@@ -12,6 +12,10 @@ CMD=		mpiserial
 CC=		mpcc
 CFLAGS=		
 
+# IFORT WITH INTEL MPI (Jet):
+#CC=		mpicc
+#CFLAGS=		
+
 all:		$(CMD)
 
 $(CMD):		$(OBJS) makefile
