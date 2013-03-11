@@ -85,7 +85,7 @@ non-zero status.
 
 static const int max_command_len=1048576; /* Limit command length to avoid buffer overflow attacks */
 
-static int mpi_inited=0;
+static int mpi_inited=0, mpi_rank=-99;
 static const char * const  default_cmdfile="cmdfile"; /* default cmdfile name */
 
 void die(const char *format,...) {
@@ -183,7 +183,7 @@ unsigned int run(const char *command) {
   /* Runs the specified command, and returns an exit status which will
      be in the range 0-255.  This correctly handles killed or stopped
      jobs, returning 128 plus the signal number. */
-  unsigned int rc;
+  unsigned int rc=99;
   int ret;
   ret=system(command);
   if(ret==-1)
@@ -197,7 +197,7 @@ unsigned int run(const char *command) {
   else
     rc=255;
 
-  if(rc<0 || rc>255) rc=255
+  if(rc>255) rc=255;
 
   return rc;
 }
@@ -358,6 +358,8 @@ int main(int argc,char **argv) {
   mpicall(MPI_Comm_rank(MPI_COMM_WORLD,&rank),"determining mpi rank in MPI_COMM_WORLD");
   mpicall(MPI_Comm_size(MPI_COMM_WORLD,&commsize),"determining MPI_COMM_WORLD size");
 
+  mpi_rank=rank; /* avoid duplicate calls by storing rank */
+
   /* Determine the mode: SPMD or MPMD */
   spmd=is_spmd(argc,rank);
   mpmd=!spmd;
@@ -384,9 +386,15 @@ int main(int argc,char **argv) {
   /* This final MPI_Barrier is necessary on some platforms: */
   mpicall(MPI_Barrier(MPI_COMM_WORLD),"during final MPI_Barrier");
 
-  /* Exit MPI cleanly: */
-  mpicall(MPI_Finalize(),"finalizing MPI library");
+#ifdef MPI_ABORT_FOR_NONZERO_EXIT
+  if(maxcode!=0)
+    /* Have to MPI_Abort in order to ensure a non-zero exit status due
+       to SGI MPT bug. */
+    mpicall(MPI_Abort(MPI_COMM_WORLD,maxcode),"calling MPI_Abort");
+  else
+#endif /* SGI MPT WORKAROUNDS */
+    mpicall(MPI_Finalize(),"finalizing MPI library");
 
-  /* Return the exit status we just calculated: */
+  /* Should never reach this line */
   return maxcode;
 }
