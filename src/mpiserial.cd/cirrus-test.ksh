@@ -7,8 +7,8 @@
 #@ output = /ptmp/wx20st/cirrus-test.log
 #@ error = /ptmp/wx20st/cirrus-test.log
 #@ job_name = cirrustest
-#@ class = dev
-#@ group = dev
+#@ class = 1
+#@ group = devonprod
 #@ account_no = HUR-T2O
 #@ node_resources = ConsumableMemory(2 GB)
 #@ wall_clock_limit = 00:10:00
