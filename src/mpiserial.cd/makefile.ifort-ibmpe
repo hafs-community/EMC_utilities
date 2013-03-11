@@ -1,0 +1,21 @@
+SHELL=		/bin/sh
+CC=		mpcc
+CFLAGS=		
+SRCS=		mpiserial.c
+OBJS=		mpiserial.o
+LSTS=		mpiserial.lst
+CMD=		mpiserial
+
+all:		$(CMD)
+
+$(CMD):		$(OBJS)
+	$(CC) $(CFLAGS) -o $(CMD) $(OBJS)
+
+mpiserial.o:	mpiserial.c
+	$(CC) -c $(FFLAGS) mpiserial.c
+
+clean:
+	rm -f $(OBJS) xref.db *~ *.o *.a a.out cmdfile *.out *.err *.log
+
+bare: clean
+	rm -f $(CMD)
