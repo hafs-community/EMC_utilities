@@ -1,7 +1,7 @@
 #! /bin/ksh --login
 #BSUB -a poe
 #BSUB -n 3
-#BSUB -oo /u/Samuel.Trahan/src/mpiscript.cd/tide-test.log
+#BSUB -oo /ptmp/Samuel.Trahan/tide-test.log
 #BSUB -R span[ptile=3]
 #BSUB -J mpiserial_test
 #BSUB -q dev
@@ -16,7 +16,7 @@ export MP_TASK_AFFINITY=core
 export MP_EUIDEVICE=sn_all
 export MP_EUILIB=us
 
-mpiserial=/gpfs/thm/u/Samuel.Trahan/src/mpiscript.cd/mpiscript
+mpiserial=/u/Samuel.Trahan/src/utilities-trunk/src/mpiserial.cd/mpiserial
 
 echo ====== /bin/true
 mpirun.lsf $mpiserial /bin/true

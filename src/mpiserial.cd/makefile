@@ -5,12 +5,12 @@ LSTS=		mpiserial.lst
 CMD=		mpiserial
 
 # IFORT WITH SGI MPT (Zeus):
-CC=		mpicc
-CFLAGS=		-DMPI_ABORT_FOR_NONZERO_EXIT
+#CC=		mpicc
+#CFLAGS=		-DMPI_ABORT_FOR_NONZERO_EXIT
 
 # IFORT WITH IBM POE (Tide, Gyre)
-#CC=		mpcc
-#CFLAGS=		
+CC=		mpcc
+CFLAGS=		
 
 all:		$(CMD)
 
