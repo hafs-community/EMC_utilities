@@ -8,7 +8,7 @@ CMD=		mpiserial
 #CC=		mpicc
 #CFLAGS=		-DMPI_ABORT_FOR_NONZERO_EXIT
 
-# IFORT WITH IBM POE (Tide, Gyre)
+# IFORT OR XLC WITH IBM POE (Tide, Gyre)
 CC=		mpcc
 CFLAGS=		
 
