@@ -1,0 +1,33 @@
+#! /usr/bin/env ruby
+
+require 'etc'
+require 'socket'
+begin
+  require 'stringio'
+rescue LoadError
+end
+begin
+  require 'yaml'
+rescue LoadError
+end
+
+require 'emc/batchsystem'
+
+all_stdin=STDIN.read()
+if(all_stdin.nil? || all_stdin=~/\A(?:\s*|\r|\n)*\z/)
+  warn "Empty job specified.  Not submitting anything."
+  exit 1
+end
+str_reader=StringIO.new(all_stdin,'r')
+
+cluster=BatchSys.localBatchSys()
+
+if(ARGV[0]=='--copy') 
+  copy=File.open(ARGV[1],'w')
+  cluster.launchJob(str_reader,true,copy)
+  copy.close()
+  str_reader.rewind()
+end
+cluster.launchJob(str_reader)
+
+exit(0)

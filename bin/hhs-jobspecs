@@ -1,0 +1,148 @@
+#! /usr/bin/env ruby
+
+require 'emc/qdisplay'
+
+include EMC::Queues
+
+# Parse arguments and environment:
+qo=EQMOptions.new()
+qo.set_emu_mode('jobspecs')
+qo.parse_arguments(ARGV)
+
+class HHSFunctions < StringFunction
+  def initialize(qo)
+    # CRITICAL: Do NOT keep a reference to qo or you will cause a
+    # memory leak in some Ruby versions due to a cycle in the
+    # reference graph.
+    @want_extras=qo.hhs_extra
+    @stid=qo.hhs_stid.downcase
+    @hwrfdata=qo.hhs_hwrfdata
+    @logdir=qo.hhs_logdir
+    @kickdir=qo.hhs_kick
+  end
+
+  def apply(text,fun,arg,job)
+    case fun.downcase
+    when 'hhs_extra_status'
+      return hhs_extra_status(text)
+    when 'hhs_extra'
+      return hhs_extra(text)
+    when 'hhs_job'
+      return hhs_job(text)
+    when 'hhs_cycle'
+      return hhs_cycle(text)
+    else
+      return ''
+    end
+  end
+
+  def hhs_extra_status(text)
+    return '' unless @want_extras
+    return text
+  end
+
+  def hhs_extra(text)
+    return '' unless @want_extras
+    if(text =~ /(.*)\/(\d{10})\/+(\d\d[a-zA-Z])\/(?:[^\/]*\/)?(hwrf_.*)\.out\z/)
+      return "" if($3.downcase!=@stid)
+      return "" if(!File.identical?("#{$1}/#{$2}/#{$3}","#{@hwrfdata}/#{$2}/#{$3}"))
+      return $4
+    end
+    if(text =~ /.*\/(\d\d[a-zA-Z][^\/]+\/jobs\/(?:WATCHERJOB|\d{10})-(?:[^-]+)-\d+.out)/)
+      return "" if(!File.identical?(File.dirname(text),@logdir))
+      return $1;
+    elsif(text =~ /pre_master/)
+      return File.basename(text);
+    end
+    return ''
+  end
+
+  def hhs_job(text)
+    if(text =~ /(.*)\/(\d{10})\/+(\d\d[a-zA-Z])\/(?:[^\/]*\/)?hwrf_.*\.out\z/)
+      if($3.downcase != @stid)
+        return "WRONGSTORM" 
+      end
+      if(!File.identical?("#{$1}/#{$2}/#{$3}","#{@hwrfdata}/#{$2}/#{$3}"))
+        return "UNKNOWNJOB" 
+      end
+      return "HWRF"
+    end
+    if(text =~ /.*\/\d\d[a-zA-Z][^\/]+\/jobs\/(?:WATCHERJOB|\d{10})-([^-]+)-\d+.out/)
+      if(!File.identical?(File.dirname(text),@logdir))
+        return "UNKNOWNJOB";
+      end
+      return $1;
+    elsif(text =~ /pre_master/)
+      if(!@kickdir.nil? && @kickdir!='')
+        if (text=~/hwrf_pre_master_kick-[^\/]+-(\d{10})-(\d\d[a-zA-Z]).out/)
+          if ($2.downcase==@stid)
+            if (File.identical?(File.dirname(text),@kickdir))
+              return "HWRF"
+            end
+          else
+            return "WRONGSTORM"
+          end
+        end
+      end
+      return "HWRF"
+    else
+      return "UNKNOWNJOB"
+    end
+  end
+
+  def hhs_cycle(text)
+    if(text =~ /(.*)\/(\d{10})\/+(\d\d[a-zA-Z])\/(?:[^\/]*\/)?hwrf.*\.out\z/)
+      # This appears to be related to a particular cycle
+      return "WRONGSTORM" if $3.downcase!=@stid
+      if(!File.identical?("#{$1}/#{$2}/#{$3}","#{@hwrfdata}/#{$2}/#{$3}"))
+        return "UNKNOWNJOB" 
+      end
+      return $2
+    elsif(text =~ /.*\/\d\d[a-zA-Z][^\/]+\/+jobs\/+(WATCHERJOB|\d{10})-[^-]+-\d+.out/)
+      if(!File.identical?(File.dirname(text),@logdir))
+        return "UNKNOWNJOB";
+      end
+      return $1
+    elsif(text =~ /pre_master/)
+      if(!@kickdir.nil? && @kickdir!='')
+        if(text=~/hwrf_pre_master_kick-[^\/]+-(\d{10})-(\d\d[a-zA-Z]).out/)
+          if($2.downcase==@stid)
+            if(File.identical?(File.dirname(text),@kickdir))
+              return $1
+            end
+          else
+            return "WRONGSTORM"
+          end
+        end
+      end
+      return "PRE_MASTER"
+    else
+      return "UNKNOWNJOB"
+    end
+  end
+end
+
+hhsfun=HHSFunctions.new(qo)
+qo.string_evaluator.add('hhs_extra_status',hhsfun)
+qo.string_evaluator.add('hhs_extra',hhsfun)
+qo.string_evaluator.add('hhs_job',hhsfun)
+qo.string_evaluator.add('hhs_cycle',hhsfun)
+
+# Decide how to print the output:
+# We have no default printer.  That way only running, future and
+# queued jobs will be printed.
+printers=Hash.new()
+printers['running']='<*-10:out.hhs_cycle> <*30:jobid> <*-10:out.hhs_job> <-2:state.hhs_extra_status><out.hhs_extra>'
+printers['future']='<*-10:out.hhs_cycle> <*30:jobid> <*-10:out.hhs_job> <-2:state.hhs_extra_status><out.hhs_extra>'
+printers['queued']='<*-10:out.hhs_cycle> <*30:jobid> <*-10:out.hhs_job> <-2:state.hhs_extra_status><out.hhs_extra>'
+qo.printers=printers
+
+# Get the queue state
+qs=qo.get_state()
+qr=QueueReporter.new(qs,qo)
+qs.update()
+
+hhs_stid=qo.hhs_stid.downcase()
+
+# Tell the EQM QueueReporter to take over:
+qr.run()

@@ -1,0 +1,27 @@
+#! /bin/sh
+
+if [[ -e /lfs1 || -e /pan2 ]] ; then
+    # We're on Jet
+    if ( which qstat | grep -i /torque/ > /dev/null 2>&1 ) ; then
+        echo sjet
+    else
+        echo jet
+    fi
+elif [[ -e /ltfs/scratch || -e /fs/scratch ]] ; then
+    echo gaea
+elif [[ -e /scratch1/portfolios || -e /scratch2/portfolios ]] ; then
+    echo zeus
+elif [[ -e /nwprod ]] ; then
+    # probably an ncep machine
+    host0=$( hostname | cut -c1-1 )
+    case "$host0" in
+        t) echo tide ;;
+        g) echo gyre ;;
+        c) echo cirrus ;;
+        s) echo stratus ;;
+        v) echo vapor ;;
+        *) echo unknown-ncep ;;
+    esac
+else
+    echo unknown
+fi

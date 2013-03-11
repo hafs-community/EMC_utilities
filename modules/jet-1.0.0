@@ -1,0 +1,19 @@
+#%Module######################################################################
+##
+##      EMC-Wide Utilities
+##      Installed by:  Samuel Trahan (Samuel.Trahan@noaa.gov)
+##	Installed on:  2012/13/04
+
+proc ModulesHelp { } {
+    puts stderr "Sets up the paths you need to use the EMC-wide utilities on Jet"
+}
+
+set base        /lfs1/projects/hwrf-vd/emc-utils
+set ver         1.0.0
+set path        $base
+
+set config	Linux.intel.64.mpi.default
+
+prepend-path RUBYLIB $base/lib
+prepend-path PATH $base/bin
+append-path PATH /apps/hpss
