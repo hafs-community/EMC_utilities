@@ -14,11 +14,11 @@ CFLAGS=		-DMPI_ABORT_FOR_NONZERO_EXIT
 
 all:		$(CMD)
 
-$(CMD):		$(OBJS)
+$(CMD):		$(OBJS) makefile
 	$(CC) $(CFLAGS) -o $(CMD) $(OBJS)
 
-mpiserial.o:	mpiserial.c
-	$(CC) -c $(FFLAGS) mpiserial.c
+mpiserial.o:	mpiserial.c makefile
+	$(CC) -c $(CFLAGS) mpiserial.c
 
 clean:
 	rm -f $(OBJS) xref.db *~ *.o *.a a.out cmdfile *.out *.err *.log

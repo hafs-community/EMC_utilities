@@ -383,16 +383,22 @@ int main(int argc,char **argv) {
   maxcode=255;
   mpicall(MPI_Allreduce(&mycode,&maxcode,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD),"using an mpi_allreduce to get the maximum return code");
 
+#ifdef MPI_ABORT_FOR_NONZERO_EXIT
+  if(mpi_rank==0 && maxcode!=0)  
+    fprintf(stderr,"%s: maximum exit status was %d.  Calling MPI_Abort instead of exiting to work around a problem in your MPI implementation.\n",argv[0],maxcode);
+#endif /* MPI_ABORT_FOR_NONZERO_EXIT */
+  
   /* This final MPI_Barrier is necessary on some platforms: */
   mpicall(MPI_Barrier(MPI_COMM_WORLD),"during final MPI_Barrier");
 
 #ifdef MPI_ABORT_FOR_NONZERO_EXIT
-  if(maxcode!=0)
+  if(maxcode!=0) {
     /* Have to MPI_Abort in order to ensure a non-zero exit status due
        to SGI MPT bug. */
     mpicall(MPI_Abort(MPI_COMM_WORLD,maxcode),"calling MPI_Abort");
-  else
-#endif /* SGI MPT WORKAROUNDS */
+  } else
+#endif /* MPI_ABORT_FOR_NONZERO_EXIT */
+
     mpicall(MPI_Finalize(),"finalizing MPI library");
 
   /* Should never reach this line */
