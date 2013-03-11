@@ -1,7 +1,75 @@
 /**********************************************************************/
 /*  PROGRAM MPISERIAL
 
-  
+PURPOSE: This program is a simple MPI wrapper that runs a serial
+program on each MPI rank.  It has been tested on GAEA, Cirrus,
+Stratus, Tide, Gyre, Zeus and Jet.  Each MPI rank has two variables
+set: SCR_COMM_RANK and SCR_COMM_SIZE containing the MPI rank and
+communicator size.  
+
+CAVEATS: This program is not a substitute for a vendor MPMD interface
+that provides support for MPI in the commands, in that it can only
+handle purely serial programs.  The script that is executed cannot run
+any MPI programs, or most MPI implementations (including those on
+Zeus, GAEA, Tide and Gyre) will fail in generally unpredictable ways.
+The coupled model case is an example of what must be handled by the
+vendor's MPMD method.
+
+AUTHORSHIP: 
+
+ circa 2010-2012 - various implementations made by Sam
+   Trahan, George Vandenberghe and Hendrik Tollman.  
+
+ late 2012 - Sam Trahan made a version that included best features of
+   all versions
+
+ early 2013 - wrong version (old wave model version) given to NCO,
+   lacking error handling and SPMD support
+
+ 2013 March - "Merged" version tested on Tide, Gyre, GAEA, Zeus,
+   Cirrus and Stratus and finalized.
+
+---------
+
+CALLING CONVENTION: This program can be called in one of two different
+ways:
+
+SINGLE PROGRAM MULTIPLE DATA (SPMD)
+
+  mpiexec mpiserial 'command to run'
+
+Called like that, the program will run the specified command on all
+MPI ranks using /bin/sh.  This is intended to be used to execute
+simple commands like hostname or sync.  However, more complex programs
+can differentiate between tasks using $SCR_COMM_RANK.
+
+Multiple arguments can be specified in SPMD mode, but they will simply
+be appended to one another with a space between each.  That behavior
+may be changed eventually to correctly handle arguments via the execvp
+family of functions.
+
+
+MULTIPLE PROGRAM MULTIPLE DATA (MPMD)
+
+  cp /my/command/file cmdfile
+  mpiexec mpiserial
+
+OR
+
+  export SCR_CMDFILE=/my/command/file
+  mpiexec mpiserial
+
+The program will read the first N lines of the command file, where N
+is the size of MPI_COMM_WORLD.  Each rank M runs the command on line
+M+1 (keeping in mind that MPI ranks are zero-based).  If the command
+file is too short, extra ranks will run "/bin/true".
+
+---------
+
+EXIT STATUS: The return status from mpiserial is 0 if the serial
+programs all exited with status 0.  If a command could not be
+executed, or if an MPI error is encountered, mpiserial will return a
+non-zero status.
 
  */
 /**********************************************************************/
@@ -21,6 +89,9 @@ static int mpi_inited=0;
 static const char * const  default_cmdfile="cmdfile"; /* default cmdfile name */
 
 void die(const char *format,...) {
+  /* Error handling function.  Exits program with a message, calling
+     MPI_Abort if needed.  On some MPI implementations it is critical
+     to call MPI_Abort or the program may hang. */
   va_list ap;
 
   va_start(ap,format);
@@ -34,6 +105,8 @@ void die(const char *format,...) {
 }
 
 void mpicall(int ret,const char *name) {
+  /* This is the MPI error handling function.  It is a simple wrapper
+     around "die" that generates an intelligible error message */
   char error[MPI_MAX_ERROR_STRING+1]="";
   int len=-1,err2;
   if(ret!=MPI_SUCCESS) {
@@ -48,6 +121,8 @@ void mpicall(int ret,const char *name) {
 }
 
 int is_spmd(const int argc,const int rank) {
+  /* Decides if the program is called in SPMD mode.  Returns 1 for
+     SPMD, 0 for MPMD and aborts if unsure. */
   int spmd,mpmd;
   char *pgmmodel;
 
@@ -70,6 +145,8 @@ int is_spmd(const int argc,const int rank) {
 }
 
 char *append_args(const int argc,const char **argv) {
+  /* Appends contents of argv together with spaces in between,
+     allocating memory as needed.  Returns the resulting string. */
   char *buf;
   int iarg;
   size_t len,len1,buflen;
@@ -103,6 +180,9 @@ char *append_args(const int argc,const char **argv) {
 }
 
 unsigned int run(const char *command) {
+  /* Runs the specified command, and returns an exit status which will
+     be in the range 0-255.  This correctly handles killed or stopped
+     jobs, returning 128 plus the signal number. */
   unsigned int rc;
   int ret;
   ret=system(command);
@@ -117,10 +197,14 @@ unsigned int run(const char *command) {
   else
     rc=255;
 
+  if(rc<0 || rc>255) rc=255
+
   return rc;
 }
 
 unsigned int spmd_run(const int argc,const char **argv,const int rank) {
+  /* Executes the specified command using the "run" function,
+     returning the resulting error code */
   char *command=append_args(argc,argv);
   unsigned int rc;
   rc=run(command);
@@ -128,7 +212,9 @@ unsigned int spmd_run(const int argc,const char **argv,const int rank) {
   return rc;
 }
 
-void set_rank_size(int commsize,int rank) {
+void set_comm_size_rank(int commsize,int rank) {
+  /* Sets the SCR_COMM_COMM and SCR_COMM_RANK variables to the
+     specified values */
   char buffer[300];
   sprintf(buffer,"%d",rank);
   setenv("SCR_COMM_RANK",buffer,1);
@@ -137,6 +223,9 @@ void set_rank_size(int commsize,int rank) {
 }
 
 unsigned int mpmd_run(const int argc,const char **argv,const int rank) {
+  /* Executes the specified command using the "run" function,
+     returning the resulting error code */
+
   char *file,*command;
   size_t len,cmdlen;
   unsigned int icmdlen;
@@ -237,7 +326,7 @@ unsigned int mpmd_run(const int argc,const char **argv,const int rank) {
     }
   } else {
     mpicall(MPI_Recv(&icmdlen,1,MPI_INTEGER,0,lentag,MPI_COMM_WORLD,MPI_STATUS_IGNORE),
-            "recieving command length from root");
+            "receiving command length from root");
     cmdlen=icmdlen;
     command=malloc(cmdlen);
     if(!command)
@@ -260,9 +349,12 @@ int main(int argc,char **argv) {
   int maxcode,mycode,spmd,mpmd,commsize;
 
   mpicall(MPI_Init( &argc, &argv ),"calling MPI_Init");
-  mpi_inited=1;
+  mpi_inited=1; /* indicate to "die" that MPI_Init was called */
 
+  /* Enable MPI error handling so that we can give intelligent error messages */
   mpicall(MPI_Errhandler_set(MPI_COMM_WORLD, MPI_ERRORS_RETURN),"initializing mpi error handler");
+
+  /* Determine the rank and size so we can forward that to the child processes */
   mpicall(MPI_Comm_rank(MPI_COMM_WORLD,&rank),"determining mpi rank in MPI_COMM_WORLD");
   mpicall(MPI_Comm_size(MPI_COMM_WORLD,&commsize),"determining MPI_COMM_WORLD size");
 
@@ -271,8 +363,9 @@ int main(int argc,char **argv) {
   mpmd=!spmd;
 
   /* Set the $SCR_COMM_RANK and $SCR_COMM_SIZE environment variables */
-  set_rank_size(commsize,rank);
+  set_comm_size_rank(commsize,rank);
 
+  /* Run the command */
   if(spmd) {
     if(argc<2)
       die("Incorrect format for SPMD mode.  Format: %s command to run\nWill run the command on all MPI ranks and exit with highest error status.\n",argv[0]);
@@ -287,7 +380,13 @@ int main(int argc,char **argv) {
   mycode=rc;
   maxcode=255;
   mpicall(MPI_Allreduce(&mycode,&maxcode,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD),"using an mpi_allreduce to get the maximum return code");
+
+  /* This final MPI_Barrier is necessary on some platforms: */
   mpicall(MPI_Barrier(MPI_COMM_WORLD),"during final MPI_Barrier");
+
+  /* Exit MPI cleanly: */
   mpicall(MPI_Finalize(),"finalizing MPI library");
+
+  /* Return the exit status we just calculated: */
   return maxcode;
 }
