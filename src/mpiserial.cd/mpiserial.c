@@ -87,6 +87,7 @@ static const int max_command_len=1048576; /* Limit command length to avoid buffe
 
 static int mpi_inited=0, mpi_rank=-99;
 static const char * const  default_cmdfile="cmdfile"; /* default cmdfile name */
+static const char * const  special_non_command="***"; /* don't run a command, exit 0 */
 
 void die(const char *format,...) {
   /* Error handling function.  Exits program with a message, calling
@@ -185,6 +186,10 @@ unsigned int run(const char *command) {
      jobs, returning 128 plus the signal number. */
   unsigned int rc=99;
   int ret;
+
+  if(!strcmp(command,special_non_command))
+    return 0;
+
   ret=system(command);
   if(ret==-1)
     die("Unable to run system(\"%s\"): %s\n",command,strerror(errno));
@@ -273,7 +278,7 @@ unsigned int mpmd_run(const int argc,const char **argv,const int rank) {
         if(cret!=buf) {
           if(feof(f)) {
             lastline=1;
-            strcpy(buf,"/bin/true");
+            strcpy(buf,special_non_command);
           } else
             die("I/O error reading command file \"%s\": %s\n",file,strerror(errno));
         }
