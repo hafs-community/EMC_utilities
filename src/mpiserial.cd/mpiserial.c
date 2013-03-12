@@ -26,7 +26,7 @@ AUTHORSHIP:
  early 2013 - wrong version (old wave model version) given to NCO,
    lacking error handling and SPMD support
 
- 2013 March - "Merged" version tested on Tide, Gyre, GAEA, Zeus,
+ 2013 March - "Merged" version tested on Tide, Gyre, GAEA, Zeus, Jet,
    Cirrus and Stratus and finalized.
 
 ---------
