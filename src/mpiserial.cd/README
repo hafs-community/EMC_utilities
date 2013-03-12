@@ -16,6 +16,11 @@ implementations (including those on Zeus, GAEA, Tide and Gyre) will
 fail in generally unpredictable ways.  The coupled model case is an
 example of what must be handled by the vendor's MPMD method.
 
+To compile, edit the makefile to select the correct build options (CC
+and CFLAGS) or create a new build option if needed.  Build options are
+provided for GAEA, Tide, Gyre, Cirrus, Stratus, Jet and Zeus.  After
+editing the makefile, simply run "make".
+
 
 This program can be called in one of two different ways:
 
