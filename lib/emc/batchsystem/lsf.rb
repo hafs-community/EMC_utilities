@@ -23,9 +23,6 @@ module LSFBatchSys
     #warn "Nodes: #{job.nodes.length}"
     #warn "Node 0: #{job.nodes[0]}"
 
-    # STEP 1: Generate the node/processor/thread configuration
-    if(job.isMPI())
-      # MPI job.  Is it OpenMP too?
 
       if(job.isOpenMP())
         # OpenMP job, so specify the threads
@@ -34,6 +31,10 @@ module LSFBatchSys
         # Not an OpenMP job, so only one thread per process
         threads=1
       end
+
+    # STEP 1: Generate the node/processor/thread configuration
+    if(job.isMPI())
+      # MPI job.  Is it OpenMP too?
       
       maxAllow=(ppn.to_f/threads).floor # max MPI ranks per node
 
@@ -63,14 +64,14 @@ module LSFBatchSys
       cardafter+=job.setEnvCommand("LSB_PJL_TASK_GEOMETRY","\"{#{placement}}\"")+"\n"
     elsif(job.isOpenMP())
       # Pure OpenMP job
-      if(job.ompThreads>32)
+      if(threads>32)
         fail "Cannot use more than 32 threads on WCOSS."
       end
-      if(job.cpuPacking && job.ompThreads>16)
-        fail "Tried to use #{job.ompThreads} threads.  You must use CPU packing (-P cpu=pack) to use more than 16."
+      if(job.cpuPacking && threads>16)
+        fail "Tried to use #{threads} threads.  You must use CPU packing (-P cpu=pack) to use more than 16."
       end
       cardbegin+="#BSUB -a openmp\n"
-      cardbegin+="#BSUB -n #{job.ompThreads}\n"
+      cardbegin+="#BSUB -n #{threads}\n"
     else
       # Serial job
       cardbegin+="#BSUB -a poe\n"
@@ -163,13 +164,25 @@ module LSFBatchSys
     if(job.exclusive?)
       cardbegin+="#BSUB -x\n"
     end
+
+    if(job.isOpenMP()) then
+      cardafter+=job.setEnvCommand("OMP_NUM_THREADS",threads)+"\n"
+    end
     if(job.typeFlags['diskintensive'])
       cardafter+=job.setEnvCommand("MP_USE_BULK_XFER","yes")+"\n"
     end
-    if(job.cpuPacking)
-      cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'cpu')+"\n"
+    if(job.isOpenMP()) then
+      if(job.cpuPacking)
+        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'"cpu:'+threads.to_s+'"')+"\n"
+      else
+        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'"core:'+threads.to_s+'"')+"\n"
+      end
     else
-      cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'core')+"\n"
+      if(job.cpuPacking)
+        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'cpu')+"\n"
+      else
+        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'core')+"\n"
+      end
     end
 
     if(job.isMPI)
@@ -195,7 +208,12 @@ module LSFBatchSys
     end
 
     moduleload+="module load ics\n"
-    if(!job.typeFlags['intelmpi'])
+    if(job.typeFlags['intelmpi']) then
+      if(job.isOpenMP()) then
+        cardafter+=job.setEnvCommand("I_MPI_PIN_DOMAIN","auto")
+      end
+    else
+      # Using IBM MPI
       moduleload+="module load ibmpe\n"
     end
 
