@@ -124,7 +124,7 @@ module TorqueBatchSys
         # to be exclusive, we must have two ranks or more
         cardbegin+="#PBS -l procs=2\n"
       else
-        cardbegin+="#PBS -l procs=#{procs}\n"
+        cardbegin+="#PBS -l procs=#{procs*threads}\n"
       end
     else
       cardbegin+="#PBS -l nodes=";
@@ -141,7 +141,7 @@ module TorqueBatchSys
           else
             cardbegin+="+"
           end
-          cardbegin+="#{accum}:ppn=#{prev}"
+          cardbegin+="#{accum}:ppn=#{prev*threads}"
           assigned+=accum*prev
           prev=allprocs[i]
           accum=1
@@ -151,7 +151,7 @@ module TorqueBatchSys
         end
       end
       if(prev>0 && accum>0)
-        cardbegin += (first ? "" : "+") + "#{accum}:ppn=#{prev}"
+        cardbegin += (first ? "" : "+") + "#{accum}:ppn=#{prev*threads}"
         assigned+=accum*prev
       end
       if(assigned!=numprocs)
