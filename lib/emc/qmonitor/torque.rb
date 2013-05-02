@@ -131,6 +131,7 @@ module EMC
           hat['err']=nonil(hat['t/Error_Path']).gsub(/^[a-zA-Z0-9_.-]*:/,'')
           hat['name']=hat['t/Job_Name']
           hat['qtime']=hat['t/qtime']
+          hat['project']=hat['t/Account_Name']
 
           procs=hat['t/Resource_List/procs']
           rsize=hat['t/Resource_List/size']
