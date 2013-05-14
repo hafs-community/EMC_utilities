@@ -1,0 +1,942 @@
+#! /bin/env perl
+
+use warnings;
+#use strict;
+
+use POSIX qw{tzset mktime floor};
+
+# ------------ CONSTANTS -------------
+
+# Failsafe maxima and minima and defaults:
+my $max_max_tries=240;          # maximum allowed reattempts per file
+my $max_try_sleep=1200;  # maximum allowed sleep time between attempts
+my $min_try_sleep=15;    # minimum allowed sleep time between attempts
+my $max_max_time=3600 * 6; # maximum allowed total runtime before final transfer
+
+my $def_max_tries=105;
+my $def_try_sleep=30;
+my $def_max_time=1500;
+
+my $cycling_hour_step=6;
+
+# All recognized commands in rttrans2 input files:
+my %all_commands;
+foreach (qw{ lib let start do end fileset file hourly
+             transfer run target source times config }) {
+  $all_commands{$_}=1;
+}
+
+# Start time of script
+my $start_time=time();
+my $start_day = floor(($start_time)/24/3600) * 24*3600;
+
+# Change timezone to UTC:
+$ENV{TZ}='UTC';
+tzset();
+
+# Verbosity flag:
+my $verbose=0;
+
+# ------------ SET THE RANDOM SIGNATURE STRING ------------
+
+my $program_signature='';
+do {
+  my @digits=( 0,1,2,3,4,5,6,7,8,9,
+           qw{ a b c d e f g h i j
+               k l m n o p q r s t
+               u v w x y z A B C D
+               E F G H I J K L M N
+               O P Q R S T U V W X
+               Y Z _ -             });
+
+  # Set a decent random seed:
+  srand(time() ^ $$ ^ unpack("%L*",`ps ax | gzip -f`));
+
+  # Generate the fifteen digits of the random number:
+  for (my $i=0;$i<15;$i++) {
+    $program_signature.=$digits[int(rand(64))];
+  }
+};
+
+# ------------ ANONYMOUS STRING-PARSING FUNCTIONS -------------
+
+my %string_funs=
+  (
+   zpad=>sub {
+     my ($fun,$val,$arg)=@_;
+     $arg=2 unless defined($arg);
+     $arg=2 unless $arg=~/\A\d+\z/;
+     my $format="\%0${arg}d";
+     return sprintf($format,$val);
+   },
+   doy=>sub {  # day of year
+     my($fun,$val,$arg)=@_;
+     my $YMDH=$val;
+     if ($YMDH !~ /\A(\d\d\d\d)(0\d|10|11|12)(0\d|1\d|2\d|30|31)(0\d|1\d|2[0123])\z/) {
+       die "Invalid YYYYMMDDHH \"$YMDH\"\n";
+     }
+     my $time=mktime(0,0,12,$3,$2-1,$1-1900,0,0,0);
+     my $year=mktime(0,0,0,1,0,$1-1900,0,0,0);
+     return sprintf("%d",floor(($time-$year)/24/3600)+1);
+   },
+   hod=>sub {  # hour of day
+     my($fun,$val,$arg)=@_;
+     my $YMDH=$val;
+     if ($YMDH !~ /\A(\d\d\d\d)(0\d|10|11|12)(0\d|1\d|2\d|30|31)(0\d|1\d|2[0123])\z/) {
+       die "Invalid YYYYMMDDHH \"$YMDH\"\n";
+     }
+     my $time=mktime(0,0,$4,$3,$2-1,$1-1900,0,0,0);
+     my $day=mktime(0,0,0,$3,$2-1,$1-1900,0,0,0);
+     my $year=mktime(0,0,0,1,0,$1-1900,0,0,0);
+     return sprintf("%d",floor(($time-$day)/3600));
+   }                     
+  );
+
+# ------------ UTILITY SUBROUTINES -------------
+
+sub verbose {
+  warn @_ if $verbose;
+}
+
+sub cycle_plus {
+  my ($YMDH,$hours)=@_;
+  if ($YMDH !~ /\A(\d\d\d\d)(0\d|10|11|12)(0\d|1\d|2\d|30|31)(0\d|1\d|2[0123])\z/) {
+    die "Invalid YYYYMMDDHH \"$YMDH\"\n";
+  }
+  my @ymdhM6=gmtime(mktime(0,0,$4,$3,$2-1,$1-1900,0,0,0)+3600*$hours);
+  return sprintf("%04d%02d%02d%02d",
+                 $ymdhM6[5]+1900,$ymdhM6[4]+1,
+                 $ymdhM6[3],$ymdhM6[2]);
+}
+
+sub start_epoch {               # epoch time when the program started
+  return $start_time;
+}
+
+sub cycle_epoch {
+  my $YMDH=$_[0];
+  if ($YMDH !~ /\A(\d\d\d\d)(0\d|10|11|12)(0\d|1\d|2\d|30|31)(0\d|1\d|2[0123])\z/) {
+    die "Invalid YYYYMMDDHH \"$YMDH\"\n";
+  }
+  return mktime(0,0,$4,$3,$2-1,$1-1900,0,0,0);
+}
+
+sub current_cycle {           # current cycle when the program started
+  my $stepping=$cycling_hour_step;
+  my $nowish=floor($start_time/3600/$stepping)*3600*$stepping;
+  my ($sec,$min,$hour,$mday,$mon,$year,@junk)=gmtime($nowish);
+  return sprintf("%04d%02d%02d%02d",$year+1900,$mon+1,$mday,$hour);
+}
+
+sub parse_opts {
+  my $vars=shift;
+  my $str=shift;
+  my $line=shift;
+  my %out;
+  my $p;
+  my $rest=$str;
+#warn "ARGS: ($vars)($str)($line)";
+  while(defined($rest) && $rest ne '') {
+    last if($rest=~/\A\s*\z/);
+#    warn "PARSE ($rest)\n";
+    ($p,$rest)=($rest=~/\A\s*((?:[a-zA-Z_][a-zA-Z0-9_]*)\s*(?:(?:=|>=|<=|>|<)\s*(?:\"(?:[^\"]+|(?:\\\\)*\\\")*\"|\{\{(?:[^\}]*|(?:(?<!\})\}))*\}\}|\S*))?)\s*(.*?)\s*\z/);
+#    warn "SPLIT INTO ($p)($rest)";
+    if(!defined($p) || $p eq '') {
+      if(defined($rest) && $rest !~ /\A\s*\z/) {
+        warn "Don't know what to do with \"$p$rest\" (line $line).\n";
+        last;
+      }
+    }
+    my ($key,$rel,$arg)=($p=~/\A([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:(=|>=|<=|>|<)\s*(\"(?:[^\"]+|(?:\\\\)*\\\")*\"|\{\{(?:[^\}]*|(?:(?<!\})\}))*\}\}|\S*))?\z/);
+    if(defined($arg)) {
+        if($arg=~/\A\"(.*?)\"\z/) {
+            $arg=$1;
+        } elsif($arg=~/\A\{\{(.*)\}\}\z/) {
+            $arg=$1;
+        }
+    }
+    if (!defined($key) || $key eq '') {
+      warn "Don't know what to do with \"$p\" (line $line).\n";
+    } else {
+      if (!defined($rel)) {
+        $out{$key}=1;
+      } elsif ($rel eq '=') {
+        $out{$key}=var_sub($vars,$arg);
+      } elsif ($rel eq '>') {
+        $out{"${key}_gt"}=var_sub($vars,$arg);
+      } elsif ($rel eq '<') {
+        $out{"${key}_lt"}=var_sub($vars,$arg);
+      } elsif ($rel eq '>=') {
+        $out{"${key}_ge"}=var_sub($vars,$arg);
+      } elsif ($rel eq '<=') {
+        $out{"${key}_le"}=var_sub($vars,$arg);
+      } else {
+        warn "Don't know what to do with \"$p\" (line $line).\n";
+      }
+    }
+  }
+  return %out;
+}
+
+# ------------ VARIABLE PARSER SUBROUTINES -------------
+
+sub validate_var {
+  my ($name,$val)=@_;
+  if ($name eq 'max_tries') {
+    $val=$def_max_tries unless defined $val;
+    $val=0+$val;
+    if (!($val<=$max_max_tries)) {
+      warn "FAILSAFE: \$max_tries=$val.  Maximum allowed is $max_max_tries.  Forcing a lower \$max_tries.\n";
+      $val=$max_max_tries;
+    }
+  } elsif ($name eq 'try_sleep') {
+    $val=$def_try_sleep unless defined $val;
+    $val=0+$val;
+    if (!($val<=$max_try_sleep)) {
+      warn "FAILSAFE: \$try_sleep=$val.  Maximum allowed is $max_try_sleep.  Forcing a lower \$try_sleep.\n";
+      $val=$max_try_sleep;
+    }
+    if (!($val>=$min_try_sleep)) {
+      warn "FAILSAFE: \$try_sleep=$val.  Minimum allowed is $min_try_sleep.  Forcing a higher \$try_sleep.\n";
+      $val=$min_try_sleep;
+    }
+  } elsif ($name eq 'max_time') {
+    $val=$def_max_time unless defined $val;
+    $val=0+$val;
+    if (!($val<=$max_max_time)) {
+      warn "FAILSAFE: \$max_time=$val.  Maximum allowed is $max_max_time.  Forcing a lower \$max_time.\n";
+      $val=$max_max_time;
+    }
+        
+  }
+  return $val
+}
+
+sub dump_opts {
+  my %opts=@_;
+  foreach my $k (keys %opts) {
+    print "  <$k=$opts{$k}>";
+  }
+}
+
+sub var_expand_impl {
+  my ($vars,$data)=@_;
+  
+  if($data eq "\$") {
+    return "\$";
+  }
+
+  $data=~/\A([a-z_A-Z][a-zA-Z_0-9]*)((?:\.[a-z_A-Z][a-z_A-Z0-9]*(?:\([^\)]*\))?)*)(?:(:\+|:-|:)(.*))?\z/ms;
+  my ($varname,$functions,$operator,$operand)=($1,$2,$3,$4);
+
+  my $vartext=$vars->{$varname};
+  my $varset=(defined($vars->{$varname}) && $vars->{$varname} ne '');
+    
+  my @funs=($functions=~/[a-z_A-Z][a-z_A-Z0-9]*(?:\([^\)]*\))?/gms);
+    
+  if ($#funs>=0) {
+    my $text=$vartext;
+    my $fun;
+    $text='' unless defined($text);
+    foreach $fun(@funs) {
+      $fun=~/\A([A-Za-z_0-9]+)(?:\(([^\)]*)\)|)\z/;
+      my ($funname,$funargs)=($1,$2);
+      $funargs='' unless defined($funargs);
+      if (defined($string_funs{$funname})) {
+        $text=&{$string_funs{$funname}}($funname,$text,$funargs);
+      }
+    }
+    $vartext=$text;
+    $varset=(defined($text) && $text ne '');
+  }
+
+  if (!defined($operator)) {
+    return $varset ? var_sub($vars,$vartext) : '';
+  }
+
+  if ($operator eq ':') {
+    return '' unless defined $varset;
+
+    my ($i,$j) = ($operand =~ /\A(\d+)(?::(\d+))?\z/);
+    return substr(var_sub($vars,$vartext),$i,$j) if(defined($j));
+    return substr(var_sub($vars,$vartext),$i) if(defined($i));
+  }
+  if ($operator eq ':-') {
+    return var_sub($vars,$varset ? $vartext : $operand);
+  }
+  if ($operator eq ':+') {
+    return $varset ? var_sub($vars,$operand) : '';
+  }
+
+  return '';
+}
+
+sub no_undef {
+  my @out;
+  foreach (@_) {
+    return $_ if(defined($_));
+  }
+  return undef;
+}
+
+sub var_sub {
+  my ($vars,$str)=@_;
+  $str =~ s/\$(?:
+              ([A-Za-z_][A-Za-z_0-9]*)
+            | \{([^\}]*)\}
+            | (.)
+                 ) /${\var_expand_impl($vars,no_undef($1,$2,$3))}/msgx;
+  return $str;
+}
+
+# ------------ INPUT FILE PARSERS: HOURLY BLOCK -------------
+
+sub hourly {
+  my ($varref,$lineref,$linestart,$cycle,%hourlyopt)=@_;
+  my ($hrstart,$hrstep,$hrstop);
+
+  $hrstart=0+$hourlyopt{start};
+  $hrstop=0+$hourlyopt{stop};
+  $hrstep=0+$hourlyopt{step};
+
+  $hrstep=1 unless $hrstep>=1;
+
+  my %vars=%{$varref};
+  my $vars=\%vars;
+  my @lines=@{$lineref};
+
+  my @fileset=();
+
+  my $line;
+  for (my $fhr=$hrstart;$fhr<=$hrstop;$fhr+=$hrstep) {
+    $vars{FHR}=$fhr;
+    $vars{FCYC}=cycle_plus($cycle,$vars{FHR});
+    for (my $lineadd=0;$lineadd<=$#lines;$lineadd++) {
+      $line=$linestart+$lineadd;
+
+      $_=$lines[$lineadd];
+
+      my ($cmd,$arg,$opts) = ($_=~/^\s*([a-zA-Z]+)(?:\s+(\S+)(.*?))?\s*$/);
+      if ($cmd eq 'let') {
+        my %o=parse_opts($vars,"$arg $opts",$line);
+        foreach my $k (keys %o) {
+          verbose "LETTING $k = $o{$k}\n";
+          $vars->{$k}=$o{$k};
+        }
+      } elsif ($cmd eq 'file') {
+        my %t=parse_opts($vars,$opts,$line);
+        $t{local_file}=var_sub($vars,$arg);
+
+        verbose "Hourly possible file: \"$t{local_file}\"...\n";
+
+        # Determine the time constraints for this file, using the
+        # "hourly" block settings as defaults:
+        my $start=$hrstart;
+        my $stop=$hrstop;
+        my $step=$hrstep;
+        $start=0+$t{start} if defined($t{start});
+        $stop=0+$t{stop} if defined($t{stop});
+        $step=0+$t{step} if defined($t{step});
+        $step=1 unless $step>=1;
+
+        # Determine if this file should be generated at this forecast hour.
+        next if($vars{FHR}<$start);
+        verbose " ... start time okay ...\n";
+        next if($vars{FHR}>$stop);
+        verbose " ... stop time okay ...\n";
+        my $diff=($vars{FHR}-$start)%$step;
+        $diff=-$diff if $diff<0;
+        next if($diff>0.001);
+        verbose " ... N-hourly availability okay ...\n";
+
+        verbose " ... accept.\n";
+        push @fileset,{%t};
+      } elsif (defined($all_commands{$cmd})) {
+        warn "Syntax error: line $line: $cmd commands are not allowed in an hourly block.\n"
+      } else {
+        warn "Syntax error: line $line: ignoring unknown command $cmd.\n"
+      }
+    }
+  }
+  return @fileset;
+}
+
+# ------------ INPUT FILE PARSERS: MAIN PARSER -------------
+
+sub doit {
+  my ($start_modes,$infile,$cycle,$just_print,$input_lines,$config)=@_;
+  my %seen;
+  my $startname;
+  my $cycle_epoch=cycle_epoch($cycle);
+
+  die "no cycle" unless defined "$cycle";
+
+  my $vars={%ENV};
+  my (%filesets,%source,@linestore,%target,@commands,$linestart,%t,$key,
+      @fileset,$continue,$fileset_name,%hourlyopt,%startvars,$bad)=();
+  my @lines;
+  my $mode='global';
+
+  $vars->{cycle}=$cycle;
+  $vars->{prev}=cycle_plus($cycle,-$cycling_hour_step);
+  $vars->{next}=cycle_plus($cycle,$cycling_hour_step);
+
+  $vars->{sig}=$program_signature;
+
+  foreach (keys %$config) {
+    $vars->{$_}=$config->{$_};
+  }
+
+  print "cycle=($vars->{cycle}) prev=($vars->{prev}) next=($vars->{next})\n";
+    
+  my $global_start_okay=1; # okay  to start according to global start blocks?
+  my $start_okay=1;          # temporary variable used by start blocks
+  my $global_start_seen=0; # set to 0 unless a global start block was seen
+
+  for (my $line=1;$line<=$#{$input_lines}+1;$line++) {
+    $_=$input_lines->[$line-1];
+    last unless defined $_;
+    chomp;
+    $_=~s/^(.*?)\s*(?:\#.*)?$/$1/g;
+
+    if ($_=~s/(?<!\\)((?:\\\\)*)\\$/$1/) {
+      # Continued line.
+      s/^\s*//g;
+      $continue.=$_;
+      next;
+    } elsif (defined($continue)) {
+      s/^\s*//g;
+      $_=$continue.$_;
+      $continue=undef;
+    }
+    next if /^\s*$/;
+
+    my ($cmd,$arg,$opts) = ($_=~/^\s*([a-zA-Z]+)(?:\s+(\S+)(.*?))?\s*$/);
+
+    if (!defined($cmd)) {
+      warn "Syntax error at line $line.\n";
+      next;
+    } elsif (!defined($all_commands{lc($cmd)})) {
+      warn "Syntax error at line $line: unknown command ".uc($cmd)."\n";
+      next;
+    }
+
+    $cmd=$cmd;
+
+    $arg='' if(!defined($arg));
+    $opts='' if(!defined($opts));
+
+    if ($mode eq 'global') {
+      if ($cmd eq 'let') {
+        my %o=parse_opts($vars,"$arg $opts",$line);
+        foreach my $k (keys %o) {
+          verbose "LETTING $k = $o{$k}\n";
+          $vars->{$k}=$o{$k};
+        }
+      } elsif ($cmd eq 'config') {
+        # do nothing -- preparser handles this command
+        next;
+      } elsif ($cmd eq 'lib') {
+        my $x=var_sub($vars,"$arg$opts");
+        verbose "USE LIB ($x)\n";
+        eval "use lib '$x'";
+      } elsif ($cmd eq 'source') {
+        %source=parse_opts($vars,$opts,$line);
+        $source{type}=var_sub($vars,$arg);
+      } elsif ($cmd eq 'target') {
+        %target=parse_opts($vars,$opts,$line);
+        $target{type}=var_sub($vars,$arg);
+      } elsif ($cmd eq 'fileset') {
+        if ($opts!~ /\A\s*\z/) {
+          warn "Warning (line $line): filesets don't have any options.\n";
+        }
+        $fileset_name=var_sub($vars,$arg);
+        @fileset=();
+        $mode='fileset';
+      } elsif ($cmd eq 'hourly') {
+        $linestart=$line+1;
+        %hourlyopt=parse_opts($vars,$opts,$line);
+        $fileset_name=var_sub($vars,$arg);
+        @fileset=();
+        $mode='hourly';
+        @lines=();
+
+        my $opt;
+        foreach $opt ( qw{start stop step}) {
+          if (!defined($hourlyopt{$opt})) {
+            die "Error: $opt is undefined in hourly set $fileset_name\n";
+          }
+        }
+      } elsif ($cmd eq 'start') {
+        $arg=~s/\s*//g;
+        $arg='__UNSPECIFIED__' unless defined($arg) && $arg ne '';
+        $startname=$arg;
+        $seen{$startname}=1;
+        %startvars=parse_opts($vars,$opts,$line);
+        if (!$start_modes->{$arg}) {
+          print "$cycle: block $arg is disabled; ignoring it\n";
+          $mode='start_ignore';
+          verbose "BEGIN START_IGNORE BLOCK: ($arg)\n";
+        } else {
+          # if a matching "start" is given, starting disabled
+          # unless a timespan matches.
+          $start_okay=undef;
+          $mode='start';
+          verbose "BEGIN ENABLED START BLOCK\n";
+        }
+      } elsif ($cmd eq 'transfer') {
+        my %t=parse_opts($vars,$opts,$line);
+        $t{fileset}=var_sub($vars,$arg);
+        $t{name}='transfer';
+        push @commands,{%t};
+      } elsif ($cmd eq 'run') {
+        push @commands,var_sub($vars,"$arg$opts");
+      } elsif (defined($all_commands{$cmd})) {
+        $bad=uc($cmd);
+        warn "Error at line $line: $bad commands are not valid in the global scope.\n";
+      }
+    } elsif ($mode eq 'hourly') {
+      if ($cmd eq 'end') {
+        $mode='global';
+        @fileset=hourly($vars,\@lines,$linestart,$cycle,%hourlyopt);
+        $filesets{$fileset_name}=[@fileset];
+      } else {
+        verbose "ADD LINE TO HOURLY BLOCK: ($fileset_name)($_)\n";
+        push @lines,$_;
+      }
+    } elsif ($mode eq 'start' || "$mode" eq 'start_ignore') {
+      my ($from,$to);
+      if ($cmd eq 'times') {
+        if ($arg eq 'T') {
+          # Time is relative to cycle.
+          if ($opts=~/\A\s*([+-]\d+)\s*([+-]\d+)\s*\z/) {
+            my $cyctime=$cycle_epoch;
+            my $xx=($start_time-$cyctime)/60;
+            my ($ta,$tz)=($1,$2);
+
+            $from=$cyctime + $ta*60;
+            $to=$cyctime + $tz*60;
+          } else {
+            warn "Syntax error at line $line: cannot parse cycle-relative time range \"$opts\".\n";
+            next;
+          }
+        } else {
+          # Time is relative to day
+          if ($arg=~/\A\s*0*(\d+)\s*:\s*0*(\d+)\s*\z/) {
+            $from=$start_day+$1*3600+$2*60;
+          } else {
+            warn "Syntax error at line $line: cannot parse \"from\" time \"$arg\".\n";
+            next;
+          }
+          if ($opts=~/\A\s*0*(\d+)\s*:\s*0*(\d+)\s*\z/) {
+            $to=$start_day+$1*3600+$2*60;
+          } else {
+            warn "Syntax error at line $line: cannot parse \"to\" time \"$arg\".\n";
+            next;
+          }
+        }
+        if ($to<$from) {
+          warn "Warning (line $line): \"from\" time is later than \"to time so this timespan can never match.\n";
+        }
+        if ($start_time>=$from && $start_time<=$to && 
+            "$mode" ne "start_ignore") {
+          # We're within a start time of an enabled start
+          # block, so starting is okay.
+          $start_okay=1;
+        }
+      } elsif ($cmd eq 'do') {
+        # This start block is not a global start limitation.  
+        # It is a set of commands with start limitations.
+        # Do we execute these commands?
+        if ($mode eq 'start_ignore') {
+          $mode='do_ignore';
+        } elsif ($start_okay) {
+          $mode='do';
+          push @commands,{name=>'pushvars',blockname=>$startname};
+          foreach $key (keys %startvars) {
+            push @commands,{name=>'let',varname=>$key,value=>$startvars{$key}};
+          }
+        } else {
+          print "$cycle: block $startname is not within allowed start times; ignoring it\n";
+          $mode='do_ignore';
+        }
+        $start_okay=1;
+      } elsif ($cmd eq 'end') {
+        # This is the end of a global start limitation block.
+        $mode='global';
+        $global_start_seen=1;
+        $global_start_okay=$global_start_okay || $start_okay;
+      } elsif (defined($all_commands{$cmd})) {
+        $bad=uc($cmd);
+        warn "Syntax error at line $line: $bad commands are not allowed in filesets.\n";
+        next;
+      }
+    } elsif ($mode eq 'do' || $mode eq 'do_ignore') {
+      if ($cmd eq 'let') {
+        next if $mode eq 'do_ignore';
+        my %o=parse_opts($vars,"$arg $opts",$line);
+        foreach my $k (keys %o) {
+          push @commands,{name=>'let',varname=>$k,value=>$o{$k}};
+        }
+      } elsif ($cmd eq 'transfer') {
+        next if $mode eq 'do_ignore';
+        %t=parse_opts($vars,$opts,$line);
+        $t{fileset}=var_sub($vars,$arg);
+        $t{name}='transfer';
+        push @commands,{%t};
+      } elsif ($cmd eq 'run') {
+        next if $mode eq 'do_ignore';
+        push @commands,var_sub($vars,"$arg$opts");
+      } elsif ($cmd eq 'end') {
+        my $oldmode=$mode;
+        $mode='global';
+        next if $oldmode eq 'do_ignore';
+        push @commands,{name=>'popvars'};
+      } elsif (defined($all_commands{$cmd})) {
+        $bad=uc($cmd);
+        warn "Syntax error at line $line: $bad commands are not allowed in filesets.\n";
+      }
+    } elsif ($mode eq 'fileset') {
+      if ($cmd eq 'let' || $cmd eq 'target' || $cmd eq 'source' 
+          || $cmd eq 'fileset' || $cmd eq 'transfer' || $cmd eq 'run' 
+          || $cmd eq 'lib' || $cmd eq 'times' || $cmd eq 'start') {
+        $bad=uc($cmd);
+        warn "Syntax error at line $line: $bad commands are not allowed in filesets.\n";
+        next;
+      } elsif ($cmd eq 'file') {
+        %t=parse_opts($vars,$opts,$line);
+        $t{local_file}=var_sub($vars,$arg);
+        push @fileset,{%t};
+      } elsif ($cmd eq 'end') {
+        $mode='global';
+        $filesets{$fileset_name}=[@fileset];
+        @fileset=();
+      } elsif (defined($all_commands{$cmd})) {
+        $bad=uc($cmd);
+        warn "Error at line $line: $bad commands are not allowed in a fileset block.\n";
+      }
+    }
+  }
+  
+  if (!$global_start_okay && $global_start_seen) {
+    warn "Not starting due to start time restrictions in input file.  Exiting successfully without processing any data.\n";
+    exit 0;
+  }
+
+  foreach(sort {$a cmp $b} keys %{$start_modes}) {
+      if(!$seen{$_}) {
+          warn "ERROR: $_: no block defined for this start mode.  Ignoring it.\n";
+      }
+  }
+
+  my ($x,$y);
+
+  print "SOURCE: ";
+  dump_opts(%source);
+  print "\nTARGET: ";
+  dump_opts(%target);
+  print "\n";
+
+  my $trans=undef;
+  if (!$just_print) {
+    if($source{type} eq 'sftp' && $target{type} eq 'disk') {
+      eval "use sftp_download";
+      die $@ if($@ ne '');
+      die "Please specify the source machine" if(!defined($source{machine}));
+      die "Please specify the source directory" if(!defined($source{remotedir}));
+      $trans=sftp_download->new($source{machine},$source{remotedir},$target{dir},%source);
+    } elsif ($source{type} eq 'disk' && $target{type} eq 'sftp') {
+      eval "use sftp_upload";
+      die $@ if($@ ne '');
+      die "Please specify the destination machine" if(!defined($target{machine}));
+      die "Please specify the destination directory" if(!defined($target{remotedir}));
+      $trans=sftp_upload->new($target{machine},$target{remotedir},%target);
+    } elsif ($source{type} eq 'ftp' && $target{type} eq 'disk') {
+      eval "use ftp_download";
+      die $@ if($@ ne '');
+      die "Please specify the source machine" if(!defined($source{machine}));
+      die "Please specify the remote ftp directory" if(!defined($source{remotedir}));
+      $trans=ftp_download->new($source{machine},$source{remotedir},$target{dir},%source);
+    } else {
+      die "invalid transfer: only disk->sftp and ftp->disk transfers are supported\n";
+    }
+        
+    if (!defined($trans)) {
+      die "Unable to initialize transfer (\$trans is undefined).\n";
+    }
+  }
+
+  foreach $x(keys %filesets) {
+    print "FILESET $x:\n";
+    foreach $y(@{$filesets{$x}}) {
+      #print "$fs{$y}\n";
+      print "  file $y->{local_file}: "; dump_opts(%{$y}); print "\n";
+    }
+  }
+
+        
+  $vars->{max_tries}=validate_var('max_tries',$vars->{max_tries});
+  $vars->{try_sleep}=validate_var('try_sleep',$vars->{try_sleep});
+  $vars->{max_time}=validate_var('max_time',$vars->{max_time});
+
+  my $global_max_time=validate_var('max_time',$vars->{max_time});
+
+  my @varstack;
+  my $skip_block=0;
+  my $local_start=$start_time;
+
+  if($#commands<0) {
+      warn "$cycle: no commands to run for this cycle.\n";
+  }
+
+ outer: foreach $x(@commands) {
+    if (ref $x) {
+      if ($x->{name} eq 'pushvars') {
+        print "PROCESS BLOCK $x->{blockname}\n";
+        if ($#varstack>=0) {
+          die "INTERNAL ERROR: Nested blocks are not supported.";
+        }
+        my %vardup=%$vars;
+        push @varstack,{%vardup};
+        $local_start=time();
+      } elsif ($x->{name} eq 'popvars') {
+        die "VARSTACK IS EMPTY" unless $#varstack>=0;
+        $vars=pop @varstack;
+        $skip_block=0;
+      } elsif ($x->{name} eq 'transfer') {
+        next outer if $skip_block;
+        my $fsn=$x->{fileset};
+        if (!defined($filesets{$fsn})) {
+          warn "$fsn: fileset does not exist.\n";
+          next;
+        }
+        my $first=1;
+        my (%remain,%remopt);
+        my $tries=0;
+        my $fn;
+
+        while (( $first==1 || %remain) && $tries < $vars->{max_tries}) {
+          my $runtime=time()-$start_time;
+          my $local_runtime=time()-$local_start;
+          $tries=$tries+1;
+
+          if ($first!=1) {
+            if ($just_print) {
+              print "  ... would handle retries here.\n";
+              last;
+            }
+            print "  sleep $vars->{try_sleep}...\n";
+            sleep $vars->{try_sleep};
+          }
+
+          print "Transfer $fsn, try $tries/$vars->{max_tries}, time $local_runtime/$vars->{max_time}, global time $runtime/$global_max_time.\n";
+
+          if ($runtime>$global_max_time) {
+            die "Giving up: ran $runtime seconds, maximum is $global_max_time.\n";
+          }
+          if ($local_runtime>$vars->{max_time}) {
+            warn "Giving up on current transfer set: ran $local_runtime seconds, maximum is $vars->{max_time}.\n";
+            $skip_block=1;
+            next outer;
+          }
+
+          foreach $y (@{$filesets{$fsn}}) {
+            $fn=$y->{local_file};
+            if ($first || defined($remain{$fn}) || defined($remopt{$fn})) {
+              print "  file $fn: "; dump_opts(%{$y}); print "\n";
+              my $result=undef;
+              if (!$just_print) {
+                eval {
+                  $result=$trans->process_file($fn,%{$y});
+                };
+                if ("$@" ne '') {
+                  warn "ERROR: $@";
+                }
+                if (!defined($result)) {
+                  if ($y->{optional}) {
+                    $remopt{$fn}=1;
+                  } else {
+                    $remain{$fn}=1;
+                  }
+                } else {
+                  delete $remopt{$fn};
+                  delete $remain{$fn};
+                }
+              }
+            }
+          }
+          $first=0;
+        }
+        if ($tries>=$vars->{max_tries}) {
+          warn "  $fsn: FAILED.  Gave up after $tries tries.  Will now clean up and exit.\n";
+          last outer;
+        }
+      } elsif ($x->{name} eq 'let') {
+        next outer if $skip_block;
+        $vars->{$x->{varname}}=validate_var($x->{varname},$x->{value});
+      } else {
+        warn 'IGNORING UNEXPECTED COMMAND'; dump_opts(%{$x}); print "\n";    
+      }
+    } else {
+      print "RUN ($x)\n";
+      system($x) unless $just_print;
+    }
+  }
+
+  if (!$just_print) {
+    $trans->cleanup();
+  }
+
+  print "DONE.\n";
+}
+
+# ------------ INPUT FILE PARSERS: PRE-PARSER -------------
+
+sub get_config {
+  my $lines=$_[0];
+  my ($continue,$key,%config);
+  my $depth=0;
+  my $vars={%ENV};
+  $vars->{cycle}=1970010100;
+  $vars->{prev}=1970010100;
+  $vars->{next}=1970010100;
+  $vars->{sig}=$program_signature;
+  for (my $line=1;$line<=$#{$lines}+1;$line++) {
+    $_=$lines->[$line-1];
+    chomp;
+    $_=~s/^(.*?)\s*(?:\#.*)?$/$1/g;
+
+    if ($_=~s/(?<!\\)((?:\\\\)*)\\$/$1/) {
+      # Continued line.
+      s/^\s*//g;
+      $continue.=$_;
+      next;
+    } elsif (defined($continue)) {
+      s/^\s*//g;
+      $_=$continue.$_;
+      $continue=undef;
+    }
+
+    next if /^\s*$/;
+
+    my ($cmd,$arg,$opts) = ($_=~/^\s*([a-zA-Z]+)(?:\s+(\S+)(.*?))?\s*$/);
+
+    next if(!defined($cmd));
+
+    if ($depth eq 0) {
+      if ($cmd eq 'let') {
+        my %o=parse_opts($vars,"$arg $opts",$line);
+        foreach my $k (keys %o) {
+          verbose "LETTING $k = $o{$k}\n";
+          $vars->{$k}=$o{$k};
+        }
+      } elsif ($cmd eq 'fileset' || $cmd eq 'hourly' || $cmd eq 'start') {
+        $depth++;
+        next;
+      } elsif ($cmd eq 'config') {
+        die unless defined($vars);
+        die unless defined($arg);
+        die unless defined($opts);
+        die unless defined($line);
+        my %o=parse_opts($vars,"$arg $opts",$line);
+        foreach $key(keys %o) {
+          $config{$key}=$o{$key};
+        }
+      }
+    } elsif ($depth eq 1) {
+      if ($cmd eq 'end') {
+        $depth--;
+        next;
+      }
+    }
+  }
+  $config{cycling}=$cycling_hour_step unless defined($config{cycling});
+  return %config;
+}
+
+my $start_mode='__UNSPECIFIED__';
+my $infile=shift @ARGV;
+my $just_print=0;
+my @incycles=();
+my %start_modes=();
+
+while ($#ARGV >= 0) {
+  my $arg=shift @ARGV;
+  if ($arg eq '-m') {
+    if ($#ARGV>=0) {
+      $start_modes{shift @ARGV}=1;
+    } else {
+      die "ERROR: -m option requires an argument\n";
+    }
+  } elsif ($arg=~/\A[-+]?\d+\z/) {
+    verbose "INCYCLES ($arg)\n";
+    push @incycles,$arg;
+  } elsif ($arg eq '-p') {
+    $just_print=1;
+  } elsif ($arg eq '-v') {
+    $verbose=1;
+  } elsif ($arg =~ /\A-[a-zA-Z]/) {
+    warn "WARNING: Ignoring unrecognized argument \"$arg\"\n";
+  } elsif ($arg =~ /\A[A-Za-z_][A-Za-z_0-9]+\z/) {
+    verbose "START MODE ($arg)\n";
+    $start_modes{$arg}=1;
+  } else {
+    warn "WARNING: Ignoring unrecognized argument \"$arg\"\n";
+  }
+}
+
+open(my $infd,"< $infile") or die "Unable to open \"$infile\" for reading: $!\n";
+my @input_lines;
+while (defined($_=<$infd>)) {
+  push @input_lines,$_;
+}
+close $infd or warn "Error closing input file \"$infile\": $!\n";
+
+verbose "PARSE CONFIG...\n";
+my %config=get_config(\@input_lines);
+verbose "DONE PARSING CONFIG.\n";
+
+if(defined($config{cycling}) && $config{cycling} ne '') {
+  $cycling_hour_step=floor($config{cycling}+0);
+  $cycling_hour_step=1 if($cycling_hour_step<1);
+}
+
+my ($i,@cycles);
+
+my $nowcycle=current_cycle();
+
+if ($#incycles<0) {
+  # No cycles specified, so use current cycle
+  push @cycles,$nowcycle;
+} else {
+  # Remove duplicate cycles (keep first occurance):
+  my %x;
+  foreach $_(@incycles) {
+    if ($_<1e6) {
+      # Invalid cycle, so assume we mean +/- X hours:
+      my $plus=$_;
+      my $cplus=cycle_plus($nowcycle,$_);
+      $_=$cplus;
+    }
+    if (!defined($x{$_})) {
+      $x{$_}=1;
+      push @cycles,$_;
+    }
+  }
+}
+
+if ($verbose) {
+  my $key;
+  print "CONFIG:\n";
+  foreach $key(sort { $a cmp $b } keys %config) {
+    print "  $key = $config{$key}\n";
+  }
+}
+
+for ($i=0;$i<=$#cycles;$i++) {
+  print "Process Cycle ".($i+1)."/".($#cycles+1).": $cycles[$i]\n";
+  doit(\%start_modes,$infile,$cycles[$i],$just_print,\@input_lines,\%config);
+}
+
+print "Processed all ".($#cycles+1)." cycles.  Now exiting successfully.\n";
+exit 0;
