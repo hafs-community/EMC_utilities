@@ -22,25 +22,41 @@ class JetBatchSys < BatchSys
     fail "Internal error: this Jet cluster class has not defined myBatchSysName"
   end
   def launchJobImpl(stream,justPrint=false,printStream=STDOUT)
-    if(justPrint)
-      qsub=printStream
-    else
-      qsub=IO.popen("#{remotecmd} qsub","w")
+    redome=true
+    tries=0
+    while(redome) do
+      tries=tries+1
+      if(justPrint)
+        qsub=printStream
+      else
+        qsub=IO.popen("#{remotecmd} qsub","w")
+      end
+      
+      step=makeJobStep(stream)
+      jc=jobCard(step)
+      jobSetup(step,justPrint)
+      stream.rewind()
+      line=stream.readline()
+      if(line=~/^#!/)
+        qsub.write(line+jc+"\n")
+      else
+        qsub.write(jc+"\n"+line)
+      end
+      qsub.write(stream.read())
+      
+      if justPrint
+        redome=false
+      else
+        qsub.close()
+        if(tries<2 && $? != 0) then
+          redome=true
+          warn "Submission failed (exit status #{$?} from ${remotecmd} qsub).  Sleeping 30 seconds and trying again."
+          sleep(30)
+        else
+          redome=false
+        end
+      end
     end
-
-    step=makeJobStep(stream)
-    jc=jobCard(step)
-    jobSetup(step,justPrint)
-    stream.rewind()
-    line=stream.readline()
-    if(line=~/^#!/)
-      qsub.write(line+jc+"\n")
-    else
-      qsub.write(jc+"\n"+line)
-    end
-    qsub.write(stream.read())
-
-    qsub.close() unless justPrint
   end
 
   def requestRemoteSubmission(remoteBatchSys,remoteUser,localUser)
@@ -169,7 +185,7 @@ class NJetBatchSys < JetBatchSys
   end
 
   def defaultQueue
-    return 'nhfip'
+    return 'batch'
   end
   def defaultAccount
     return 'hwrfv3'
