@@ -353,22 +353,40 @@ class JobStep # a cluster-independent representation of a job step
 
       # In lines like #EMC$ @jet:
       # Skip the line unless we're on that machine
-      if(rest=~/^\s*@\s*([a-zA-Z0-9_, \t-]+)\s*:(.*)$/)
+      if(rest=~/^\s*@\s*([a-z!A-Z0-9_, \t-]+)\s*:(.*)$/)
         machines,rest = $1,$2
         machines=machines.split(/\s*,\s*/)
+        #warn "machines=#{machines} rest=#{rest}"
         right_place=false
+        stop_searching=false
         machines.each { |machine|
           machine=machine.downcase
-          where_am_i.each { |place|
-            if(place==machine)
-              #warn "@#{machine}: #{place}==#{machine}"
-              right_place=true
-              break
-            else
-              #warn "@#{machine}: #{place}!=#{machine}"
-            end
-          }
-          break if right_place
+          if(machine=~/^!(.*)/)
+            machine=$1
+            right_place=true
+            where_am_i.each { |place|
+              if(place==machine)
+                #warn "@#{machine}: #{place}==#{machine} (notted)"
+                right_place=false
+                stop_searching=true
+                break
+              else
+                #warn "@#{machine}: #{place}!=#{machine} (notted)"
+              end
+            }
+          else
+            where_am_i.each { |place|
+              if(place==machine)
+                #warn "@#{machine}: #{place}==#{machine}"
+                right_place=true
+              else
+                #warn "@#{machine}: #{place}!=#{machine}"
+              end
+            }
+          end
+          if(stop_searching)
+            break
+          end
         }
         if(!right_place)
           lineno+=1
