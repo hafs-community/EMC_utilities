@@ -12,13 +12,13 @@ qo.parse_arguments(ARGV)
 printers=Hash.new()
 printers['foot1']='From <Q_SOURCE> (age <Q_AGE> sec.)'
 if(qo.user==nil) then
-  printers['default']='<14:jobid> <11:reservation> <*12:user> <5:procs> <-2:state> <*11:qtime.time()>   <out.shortpath>'
-  printers['head1']='    Job ID     Reservation   Username   Procs ST Queue Time    Output Location'
-  printers['head2']='-------------- ----------- ------------ ----- -- -----------   ------------------------------------'
+  printers['default']='<14:jobid> <12:reservation> <*12:user> <5:procs> <-2:state> <*11:qtime.time()>   <out.shortpath>'
+  printers['head1']='    Job ID     Reservation    Username   Procs ST Queue Time    Output Location'
+  printers['head2']='-------------- ------------ ------------ ----- -- -----------   ------------------------------------'
 else
-  printers['default']='<14:jobid> <11:reservation> <5:procs> <-2:state> <*11:qtime.time()>   <out.shortpath>'
-  printers['head1']='    Job ID     Reservation Procs ST Queue Time    Output Location'
-  printers['head2']='-------------- ----------- ----- -- -----------   ------------------------------------'
+  printers['default']='<14:jobid> <12:reservation> <5:procs> <-2:state> <*11:qtime.time()>   <out.shortpath>'
+  printers['head1']='    Job ID     Reservation  Procs ST Queue Time    Output Location'
+  printers['head2']='-------------- ------------ ----- -- -----------   ------------------------------------'
 end
 qo.printers=printers
 
