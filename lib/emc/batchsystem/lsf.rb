@@ -72,6 +72,7 @@ module LSFBatchSys
       end
       cardbegin+="#BSUB -a openmp\n"
       cardbegin+="#BSUB -n #{threads}\n"
+      cardbegin+="#BSUB -R span[ptile=#{threads}]\n"
     else
       # Serial job
       cardbegin+="#BSUB -a poe\n"
