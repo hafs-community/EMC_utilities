@@ -164,8 +164,7 @@ class BatchSys
     else
       cluster,qmanager=nil,nil
     end
-
-    if(File.exist?('/lfs1') || File.exist?('/lfs2'))
+    if(File.exist?('/pan2') || File.exist?('/lfs2'))
       ENV['PATH'].split(':').each { |path|
         if(path=~/torque/ && File.executable?("#{path}/qsub"))
           # We're on the new jet
@@ -175,6 +174,8 @@ class BatchSys
       if(cluster.nil?)
         cluster,qmanager = 'tjet','GridEngine'
       end
+    elsif(File.exist?('/ttfri'))
+      cluster,qmanager = 'ttfrisaola','Torque'
     elsif(File.exist?('/scratch1') || File.exist?('/scratch2'))
       cluster,qmanager = 'zeus','Torque'
     elsif(File.exist?('/lustre/fs') || File.exist?('/lustre/ltfs'))
@@ -322,6 +323,7 @@ end
 
 require 'emc/batchsystem/zeus'
 require 'emc/batchsystem/jet'
+require 'emc/batchsystem/ttfri'
 require 'emc/batchsystem/ccs'
 require 'emc/batchsystem/wcoss'
 
@@ -349,6 +351,9 @@ class BatchSys
     if(!user.nil? && strhost=='zeus')
       fail "Cannot submit jobs as a specified user on Zeus."
     end
+    if(!user.nil? && strhost=='.*erin.*')
+      fail "Cannot submit jobs as a specified user on TTFRI HP (Erin)."
+    end
 
     case strhost
     when 'cirrus','stratus'
@@ -363,6 +368,10 @@ class BatchSys
       else
         return WCOSSBatchSys.new([strhost])
       end
+    when 'ttfrihp'
+      return TTFRIHPBatchSys.new()
+    when 'ttfri','ttfrisaola'
+      return TTFRISaolaBatchSys.new()
     when 'sjet'
       return SJetBatchSys.new()
     when 'tjet'

@@ -16,7 +16,9 @@ module TorqueBatchSys
     # Torque.
     return queue,partition
   end
-
+  def allowProcs?()
+    return true
+  end
   def convertPath(path)
     # Replace %J with $PBS_O_JOBID
     path.gsub!(/((?:^|[^%])(?:%%)*)(%J)/,'\1$PBS_O_JOBID')
@@ -118,14 +120,16 @@ module TorqueBatchSys
       fail "Internal error: nodes!=allprocs.length (#{nodes}!=#{allprocs.length})"
     end
 
-    if(job.nodes.length==1 && job.nodes[0].singleSpec? && threads==1)
+    if(allowProcs?() && job.nodes.length==1 && job.nodes[0].singleSpec? && threads==1)
       procs=job.nodes[0].singleSpec
       if(procs==1 && job.exclusive?)
         # to be exclusive, we must have two ranks or more
-        cardbegin+="#PBS -l procs=2\n"
+        cardbegin+="#PBS -l nodes=1:ppn=#{maxAllow*threads}\n"
       else
         cardbegin+="#PBS -l procs=#{procs*threads}\n"
       end
+    elsif(!allowProcs?() && job.nodes.length==1 && job.nodes[0].singleSpec? && threads==1 && job.nodes[0].singleSpec()==1)
+      cardbegin+="#PBS -l nodes=1:ppn=#{maxAllow*threads}\n"
     else
       cardbegin+="#PBS -l nodes=";
       prev=0  # number of ppn in previous node
@@ -202,16 +206,16 @@ module TorqueBatchSys
 
     queue,partition=queuePartition(job.queueOptions['queue'],job.queueOptions['partition'])
 
-    if(!queue.nil?)
+    if(!queue.nil? && queue!='')
       cardbegin+="#PBS -q #{queue}\n"
     end
-    if(!partition.nil?)
+    if(!partition.nil? && partition!='')
       cardbegin+="#PBS -l partition=#{partition}\n"
     end
 
     account=job.queueOptions['account']
     account=defaultAccount() if account.nil?
-    if(!account.nil?)
+    if(!account.nil? && account!='')
       cardbegin+="#PBS -A #{account}\n"
     end
 
