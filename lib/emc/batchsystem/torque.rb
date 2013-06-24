@@ -124,7 +124,7 @@ module TorqueBatchSys
       procs=job.nodes[0].singleSpec
       if(procs==1 && job.exclusive?)
         # to be exclusive, we must have two ranks or more
-        cardbegin+="#PBS -l nodes=1:ppn=#{maxAllow*threads}\n"
+        cardbegin+="#PBS -l nodes=1:ppn=#{[2,threads].max}\n"
       else
         cardbegin+="#PBS -l procs=#{procs*threads}\n"
       end
