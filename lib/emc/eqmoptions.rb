@@ -16,7 +16,7 @@ module EMC
 
     class EQMOptions
       include EMC::NoNil
-      attr_reader :hhs_stid,:hhs_hwrfdata,:hhs_logdir,:hhs_jobid,:hhs_extra,:hhs_kick
+      attr_reader :hhs_stid,:hhs_hwrfdata,:hhs_logdir,:hhs_jobid,:hhs_extra,:hhs_kick,:hhs_ens
       attr_reader :colormap,:hhs_colormap,:namemap,:groups,:emu_printers,:bjobs_path
       attr_reader :emu_colormaps,:greps,:antigreps,:cache,:qstat_path,:cache_file
       attr_reader :max_age,:max_loops,:loops,:min_sleep_time,:sleep_time,:reps
@@ -236,6 +236,7 @@ module EMC
       def set_defaults()
     
         # Default settings:
+        @hhs_ens=nil
         @greps=Array.new
         @antigreps=Array.new
         @cache=nil
@@ -389,6 +390,7 @@ EOS
                               ["--bjobs-path", req],
                               ["--qstat-path", req],
                               ["--pbsquery-path", req],
+                              ["--hhs-ens", req],
                               ["--showq-path", req],
                               ["--key", '-k', req],
                               ["--no-colors", '-n', noarg],
@@ -418,6 +420,7 @@ EOS
 
         opts.each do |opt,arg|
           case opt
+          when '--hhs-ens'          ; @hhs_ens=arg;
           when '--verbose'          ; @verbose=true
           when '--remove-done'      ; @no_complete=true
           when '--queue-manager'    ; @queue_manager=arg

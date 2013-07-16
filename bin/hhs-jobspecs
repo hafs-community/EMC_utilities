@@ -19,6 +19,7 @@ class HHSFunctions < StringFunction
     @hwrfdata=qo.hhs_hwrfdata
     @logdir=qo.hhs_logdir
     @kickdir=qo.hhs_kick
+    @ens=qo.hhs_ens
   end
 
   def apply(text,fun,arg,job)
@@ -76,8 +77,14 @@ class HHSFunctions < StringFunction
       if(!@kickdir.nil? && @kickdir!='')
         if (text=~/hwrf_pre_master_kick-[^\/]+-(\d{10})-(\d\d[a-zA-Z]).out/)
           if ($2.downcase==@stid)
-            if (File.identical?(File.dirname(text),@kickdir))
-              return "HWRF"
+            if(@ens.nil? || (text=~/hwrf_pre_master_kick-[^\/]+-(\d+)-(\d{10})-(\d\d[a-zA-Z]).out/ && $1==@ens))
+              if (File.identical?(File.dirname(text),@kickdir))
+                return "HWRF"
+              else
+                return "UNKNOWNJOB"
+              end
+            else
+              return "WRONGSTORM"
             end
           else
             return "WRONGSTORM"
@@ -106,9 +113,16 @@ class HHSFunctions < StringFunction
     elsif(text =~ /pre_master/)
       if(!@kickdir.nil? && @kickdir!='')
         if(text=~/hwrf_pre_master_kick-[^\/]+-(\d{10})-(\d\d[a-zA-Z]).out/)
+          cycle=$1
           if($2.downcase==@stid)
-            if(File.identical?(File.dirname(text),@kickdir))
-              return $1
+            if(@ens.nil? || (text=~/hwrf_pre_master_kick-[^\/]+-(\d+)-(\d{10})-(\d\d[a-zA-Z]).out/ && $1==@ens))
+              if(File.identical?(File.dirname(text),@kickdir))
+                return cycle
+              else
+                return "UNKNOWNJOB"
+              end
+            else
+              return "WRONGSTORM"
             end
           else
             return "WRONGSTORM"
