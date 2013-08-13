@@ -31,20 +31,20 @@ class WCOSSBatchSys < BatchSys
     return cardbegin+cardafter
   end
   def launchJobImpl(stream,justPrint=false,printStream=STDOUT)
-    local_cmd=["/usr/bin/env","-","/bin/bash","--norc","--login","-c",
-               ". /usrx/local/Modules/3.2.9/init/bash ; module load lsf ; bsub"]
+    local_cmd='/usr/bin/env - /bin/bash --norc --login -c ". /usrx/local/Modules/3.2.9/init/bash ; module load lsf ; bsub"'
     remote_bsub="bsub"
     
     if(justPrint)
       bsub=printStream
       # STDERR.puts "#{remotecmd} #{cmd} <"
     else
-      #warn "submitting via #{remotecmd} bsub"
-      if(remotecmd=~/\A\s*\z/)
+      if(remotecmd.nil? || remotecmd=='' || remotecmd=~/\A\s*\z/)
         # Not submitting remotely, so use the "local submission" command:
+        #warn "submitting via local command: #{local_cmd}"
         bsub=IO.popen(local_cmd,"w")
       else
         # Submit remotely using the simpler command
+        #warn "submitting via remote command: #{remotecmd} #{remote_bsub}"
         bsub=IO.popen("#{remotecmd} #{remote_bsub}","w")
       end
     end
