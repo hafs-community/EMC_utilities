@@ -90,11 +90,20 @@ class String
     ENV['TZ']='UTC'
 
     if(@@today.nil?)
-      tnow=DateTime.now
-      nowday=tnow.to_date
-      @@today=DateTime.parse(nowday.to_s).to_time
-      @@tomorrow=DateTime.parse((nowday+1).to_s).to_time
-      @@now=tnow.to_time
+      if(RUBY_VERSION=~/^1\.8/)
+        # Workaround for old versions of Ruby.  Probably won't handle
+        # daylight savings transitions correctly.
+        now=Time.now()
+        @@today=Time.local(now.year,now.month,now.day,0,0,0.0)
+        @@tomorrow=Time.local(now.year,now.month,now.day+1,0,0,0.0)
+        @@now=now
+      else
+        tnow=DateTime.now
+        nowday=tnow.to_date
+        @@today=DateTime.parse(nowday.to_s).to_time
+        @@tomorrow=DateTime.parse((nowday+1).to_s).to_time
+        @@now=tnow.to_time
+      end
     end
     time=nil
 
