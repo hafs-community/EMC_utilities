@@ -95,7 +95,15 @@ class String
         # daylight savings transitions correctly.
         now=Time.now()
         @@today=Time.local(now.year,now.month,now.day,0,0,0.0)
-        @@tomorrow=Time.local(now.year,now.month,now.day+1,0,0,0.0)
+        begin
+          @@tomorrow=Time.local(now.year,now.month,now.day+1,0,0,0.0)
+        rescue ArgumentError
+          begin
+            @@tomorrow=Time.local(now.year,now.month+1,1,0,0,0.0)
+          rescue ArgumentError
+            @@tomorrow=Time.local(now.year+1,1,1,0,0,0.0)
+          end
+        end
         @@now=now
       else
         tnow=DateTime.now
