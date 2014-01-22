@@ -1,5 +1,6 @@
 #! /usr/bin/env ruby
 
+require 'getoptlong'
 require 'etc'
 require 'socket'
 begin
@@ -13,6 +14,26 @@ end
 
 require 'emc/batchsystem'
 
+dryrun=false
+copyfile=nil
+
+req=GetoptLong::REQUIRED_ARGUMENT
+noarg=GetoptLong::NO_ARGUMENT
+opts=GetoptLong.new(["--copy","-c",req],["--dry-run","-d",noarg])
+opts.each do |opt,arg|
+  case opt
+  when '--copy'
+    unless copyfile.nil?
+      usage("Can only specify one --copy or -c file");
+    end
+    copyfile=arg
+  when '--dry-run'
+    dryrun=true
+  else
+    usage("Unknown option #{opt}.")
+  end
+end
+
 all_stdin=STDIN.read()
 if(all_stdin.nil? || all_stdin=~/\A(?:\s*|\r|\n)*\z/)
   warn "Empty job specified.  Not submitting anything."
@@ -22,12 +43,15 @@ str_reader=StringIO.new(all_stdin,'r')
 
 cluster=BatchSys.localBatchSys()
 
-if(ARGV[0]=='--copy') 
-  copy=File.open(ARGV[1],'w')
-  cluster.launchJob(str_reader,true,copy)
-  copy.close()
-  str_reader.rewind()
+unless copyfile.nil?
+    copy=File.open(copyfile,'w')
+    cluster.launchJob(str_reader,true,copy)
+    copy.close()
+    str_reader.rewind()
 end
-cluster.launchJob(str_reader)
+
+# For a dry run, output the job to stdout.  Otherwise, send to the job
+# submission program:
+cluster.launchJob(str_reader,dryrun)
 
 exit(0)

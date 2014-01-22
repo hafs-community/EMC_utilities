@@ -90,7 +90,7 @@ module TorqueBatchSys
     end
 
     cardafter+=job.setEnvCommand("OMP_NUM_THREADS",threads.to_s)+"\n"
-    cardafter+=job.setEnvCommand("MKL_NUM_THREADS",threads.to_s)+"\n"
+    cardafter+=job.setEnvCommand("MKL_NUM_THREADS","1")+"\n"
 
     maxAllow=(ppn.to_f/threads).floor # max MPI ranks per node
 
@@ -124,12 +124,12 @@ module TorqueBatchSys
       procs=job.nodes[0].singleSpec
       if(procs==1 && job.exclusive?)
         # to be exclusive, we must have two ranks or more
-        cardbegin+="#PBS -l nodes=1:ppn=#{[2,threads].max}\n"
+        cardbegin+="#PBS -l nodes=1:ppn=2\n"
       else
-        cardbegin+="#PBS -l procs=#{procs*threads}\n"
+        cardbegin+="#PBS -l procs=#{procs}\n"
       end
     elsif(!allowProcs?() && job.nodes.length==1 && job.nodes[0].singleSpec? && threads==1 && job.nodes[0].singleSpec()==1)
-      cardbegin+="#PBS -l nodes=1:ppn=#{maxAllow*threads}\n"
+      cardbegin+="#PBS -l nodes=1:ppn=#{maxAllow}\n"
     else
       cardbegin+="#PBS -l nodes=";
       prev=0  # number of ppn in previous node
@@ -145,7 +145,7 @@ module TorqueBatchSys
           else
             cardbegin+="+"
           end
-          cardbegin+="#{accum}:ppn=#{prev*threads}"
+          cardbegin+="#{accum}:ppn=#{prev}"
           assigned+=accum*prev
           prev=allprocs[i]
           accum=1
@@ -155,13 +155,17 @@ module TorqueBatchSys
         end
       end
       if(prev>0 && accum>0)
-        cardbegin += (first ? "" : "+") + "#{accum}:ppn=#{prev*threads}"
+        cardbegin += (first ? "" : "+") + "#{accum}:ppn=#{prev}"
         assigned+=accum*prev
       end
       if(assigned!=numprocs)
         fail "internal error: wanted #{numprocs} but requested #{assigned}"
       end
       cardbegin+="\n"
+    end
+
+    if job.exclusive?
+      cardbegin+="#PBS -n\n"
     end
 
     ############################################################
