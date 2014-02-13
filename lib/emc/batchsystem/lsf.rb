@@ -14,6 +14,23 @@ module LSFBatchSys
     ppn=coresPerNode
     ppn=packedPPN if(!!job.cpuPacking)
 
+    mpi=true  # job.isMPI()
+    omp=job.isOpenMP()
+
+    queue=job.queueOptions['queue']
+    queue=defaultQueue() if queue.nil?
+    cardbegin+="#BSUB -q #{queue}\n"
+    res=job.queueOptions['reservation']
+    if(!res.nil? && res!='')
+      cardbegin+="#BSUB -U #{job.queueOptions['reservation']}\n"
+    end
+
+    cardbegin+="#BSUB -R affinity[core]\n"
+
+    if(queue=='transfer')
+      mpi=false
+    end
+
     if(!job.parsed?)
       fail "You never called job.parse"
     else
@@ -24,7 +41,7 @@ module LSFBatchSys
     #warn "Node 0: #{job.nodes[0]}"
 
 
-      if(job.isOpenMP())
+      if(omp)
         # OpenMP job, so specify the threads
         threads=job.ompThreads
       else
@@ -33,7 +50,7 @@ module LSFBatchSys
       end
 
     # STEP 1: Generate the node/processor/thread configuration
-    if(job.isMPI())
+    if(mpi)
       # MPI job.  Is it OpenMP too?
       
       maxAllow=(ppn.to_f/threads).floor # max MPI ranks per node
@@ -62,7 +79,7 @@ module LSFBatchSys
       cardbegin+="#BSUB -n #{nodes*maxppn}\n"
       cardbegin+="#BSUB -R span[ptile=#{maxppn}]\n"
       cardafter+=job.setEnvCommand("LSB_PJL_TASK_GEOMETRY","\"{#{placement}}\"")+"\n"
-    elsif(job.isOpenMP())
+    elsif(omp)
       # Pure OpenMP job
       if(threads>32)
         fail "Cannot use more than 32 threads on WCOSS."
@@ -75,7 +92,7 @@ module LSFBatchSys
       cardbegin+="#BSUB -R span[ptile=#{threads}]\n"
     else
       # Serial job
-      cardbegin+="#BSUB -a poe\n"
+      #cardbegin+="#BSUB -a poe\n"
       cardbegin+="#BSUB -n 1\n"
     end
 
@@ -112,26 +129,15 @@ module LSFBatchSys
     end
 
     ############################################################
-    ## SET QUEING AND ACCOUNTING OPTIONS
-
-    queue=job.queueOptions['queue']
-    queue=defaultQueue() if queue.nil?
-    cardbegin+="#BSUB -q #{queue}\n"
-    res=job.queueOptions['reservation']
-    if(!res.nil? && res!='')
-      cardbegin+="#BSUB -U #{job.queueOptions['reservation']}\n"
-    end
-
-    ############################################################
     ## SET RESOURCE LIMITS
 
     vmem=job.limitOptions['vmem']
     realmem=job.limitOptions['realmem']
     if(!vmem.nil?)
-      cardbegin+="#BSUB -v #{vmem*1024}\n"
+      cardbegin+="#BSUB -v #{vmem}\n"
     end
     if(!realmem.nil?)
-      cardbegin+="#BSUB -M #{realmem*1024}\n"
+      cardbegin+="#BSUB -M #{realmem}\n"
     end
     starttime=job.limitOptions['starttime']
     if(!starttime.nil?)
@@ -166,13 +172,13 @@ module LSFBatchSys
       cardbegin+="#BSUB -x\n"
     end
 
-    if(job.isOpenMP()) then
+    if(omp) then
       cardafter+=job.setEnvCommand("OMP_NUM_THREADS",threads)+"\n"
     end
     if(job.typeFlags['diskintensive'])
       cardafter+=job.setEnvCommand("MP_USE_BULK_XFER","yes")+"\n"
     end
-    if(job.isOpenMP()) then
+    if(omp) then
       if(job.cpuPacking)
         cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'"cpu:'+threads.to_s+'"')+"\n"
       else
@@ -186,7 +192,7 @@ module LSFBatchSys
       end
     end
 
-    if(job.isMPI)
+    if(mpi)
       cardafter+=job.setEnvCommand("MP_EUIDEVICE","sn_all")+"\n"
       cardafter+=job.setEnvCommand("MP_EUILIB","us")+"\n"
     end
@@ -210,7 +216,7 @@ module LSFBatchSys
 
     moduleload+="module load ics\n"
     if(job.typeFlags['intelmpi']) then
-      if(job.isOpenMP()) then
+      if(omp) then
         cardafter+=job.setEnvCommand("I_MPI_PIN_DOMAIN","auto")
       end
     else
