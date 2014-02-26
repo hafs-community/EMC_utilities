@@ -82,6 +82,9 @@ non-zero status.
 #include <string.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 static const int max_command_len=1048576; /* Limit command length to avoid buffer overflow attacks */
 
@@ -215,6 +218,18 @@ unsigned int spmd_run(const int argc,const char **argv,const int rank) {
   rc=run(command);
   free(command);
   return rc;
+}
+
+void hydra_workaround(void) {
+  struct stat s;
+  if(!fstat(0,&s) && S_ISDIR(s.st_mode)) {
+    fprintf(stderr,"warning: stdin is a directory; reopening /dev/null.  This is a bug in the Hydra MPI.  Submit a ticket to your helpdesk.\n");
+    int x=open("/dev/null",O_RDONLY);
+    if(x>0)
+      dup2(x,0);
+    else
+      fprintf(stderr,"error: could not open /dev/null: %s\n",strerror(errno));
+  }
 }
 
 void set_comm_size_rank(int commsize,int rank) {
@@ -355,6 +370,8 @@ int main(int argc,char **argv) {
 
   mpicall(MPI_Init( &argc, &argv ),"calling MPI_Init");
   mpi_inited=1; /* indicate to "die" that MPI_Init was called */
+
+  hydra_workaround(); /* make sure stdin is not a directory */
 
   /* Enable MPI error handling so that we can give intelligent error messages */
   mpicall(MPI_Errhandler_set(MPI_COMM_WORLD, MPI_ERRORS_RETURN),"initializing mpi error handler");
