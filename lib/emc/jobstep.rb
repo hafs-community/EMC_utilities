@@ -13,8 +13,11 @@ class JobStepNodes
     @nodes=nodes
     @procs=procs
   end
-  def totalProcs
+  def totalProcs # total number of MPI ranks (synonym for totalRanks)
     return @nodes*@procs
+  end
+  def totalRanks # total number of MPI ranks (synonym for totalProcs)
+    return totalProcs()
   end
   def spreadNodes(maxThreads,threadsPerProc)
     fail 'nil maxThreads' if maxThreads.nil?
@@ -49,6 +52,9 @@ fail "nil procs" if procs.nil?
     else
       return @groups*@procs
     end
+  end
+  def totalRanks # total number of MPI ranks (synonym for totalProcs)
+    return totalProcs()
   end
   def singleSpec
     return @procs

@@ -40,7 +40,7 @@ module LSFBatchSys
     #warn "Nodes: #{job.nodes.length}"
     #warn "Node 0: #{job.nodes[0]}"
 
-
+    total_tasks=1
       if(omp)
         # OpenMP job, so specify the threads
         threads=job.ompThreads
@@ -59,10 +59,12 @@ module LSFBatchSys
       nodes=0  # number of nodes requested
       placement='' # processor placement string
       ip=0     # processor index
+      total_tasks=0
       job.nodes.each { |nodespec|
         nodeArray=nodespec.spreadNodes(ppn,threads)
         fail "empty nodeArray" if nodeArray.empty?
         nodes+=nodeArray.length
+        total_tasks+=nodespec.totalRanks()
         nodeArray.each { |procs|
           if(procs<1)
             fail "internal error: somehow procs<1 (procs=#{procs})"
@@ -158,6 +160,9 @@ module LSFBatchSys
       cpuhrs=(cputime/60).floor
       cpumins=cputime-cpuhrs*60
       cardbegin+=sprintf("#BSUB -c %02d:%02d\n",cpuhrs,cpumins)
+    end
+    if(job.typeFlags['total_tasks'])
+      cardafter+=job.setEnvCommand("TOTAL_TASKS",total_tasks.to_s)+"\n"
     end
 
     ############################################################

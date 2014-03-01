@@ -24,13 +24,15 @@ module LoadLevelerBatchSys
     end
       
     maxAllow=(ppn.to_f/threads).floor # max MPI ranks per node
-    
+
+    total_tasks=0
     maxppn=0 # maximum number of MPI ranks requested on any node by this job
     nodes=0  # number of nodes requested
     placement='' # processor placement string
     ip=0     # processor index
     job.nodes.each { |nodespec|
       nodeArray=nodespec.spreadNodes(ppn,threads)
+      total_tasks+=nodespec.totalRanks()
       fail "empty nodeArray" if nodeArray.empty?
       nodes+=nodeArray.length
       nodeArray.each { |procs|
@@ -129,6 +131,9 @@ module LoadLevelerBatchSys
       wallhrs=(walltime/60).floor
       wallmins=walltime-wallhrs*60
       cardbegin+=sprintf("#\@ wall_clock_limit = %02d:%02d:00\n",wallhrs,wallmins)
+    end
+    if(job.typeFlags['total_tasks'])
+      cardafter+=job.setEnvCommand("TOTAL_TASKS",total_tasks.to_s)+"\n"
     end
 
     ############################################################

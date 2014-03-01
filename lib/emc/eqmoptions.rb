@@ -71,6 +71,10 @@ module EMC
         end
       end
 
+      def parse_only_dash_options(argv)
+          parse_dash_options(argv);
+      end
+
       def parse_arguments(argv)
         parse_dash_options(argv)
         if(@emu_mode=='hwrf_hhs_jobspecs.pl') then

@@ -98,10 +98,12 @@ module TorqueBatchSys
     nodes=0
     numprocs=0
     maxppn=0
+    total_tasks=0
 
     job.nodes.each { |nodespec|
       nodeArray=nodespec.spreadNodes(ppn,threads)
       fail "empty nodeArray" if nodeArray.empty?
+      total_tasks+=nodespec.totalRanks()
       nodes+=nodeArray.length
       allprocs+=nodeArray
       nodeArray.each { |procs|
@@ -259,6 +261,9 @@ module TorqueBatchSys
       wallhrs=(walltime/60).floor
       wallmins=walltime-wallhrs*60
       cardbegin+=sprintf("#PBS -l walltime=%02d:%02d:00\n",wallhrs,wallmins)
+    end
+    if(job.typeFlags['total_tasks'])
+      cardafter+=job.setEnvCommand("TOTAL_TASKS",total_tasks.to_s)+"\n"
     end
 
     ############################################################

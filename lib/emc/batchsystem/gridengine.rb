@@ -26,7 +26,7 @@ module GridEngineBatchSys
     end
 
     cardafter+=job.setEnvCommand("OMP_NUM_THREADS",threads.to_s)+"\n"
-    cardafter+=job.setEnvCommand("MKL_NUM_THREADS",threads.to_s)+"\n"
+    cardafter+=job.setEnvCommand("MKL_NUM_THREADS",'1')+"\n"
 
     maxAllow=(ppn.to_f/threads).floor # max MPI ranks per node
 
@@ -35,7 +35,9 @@ module GridEngineBatchSys
     numprocs=0
     maxppn=0
 
+    total_tasks=0
     job.nodes.each { |nodespec|
+      total_tasks+=nodespec.totalRanks()
       nodeArray=nodespec.spreadNodes(ppn,threads)
       fail "empty nodeArray" if nodeArray.empty?
       nodes+=nodeArray.length
@@ -127,6 +129,9 @@ module GridEngineBatchSys
       wallhrs=(walltime/60).floor
       wallmins=walltime-wallhrs*60
       cardbegin+=sprintf("#\$ -l h_rt=%02d:%02d:00\n",wallhrs,wallmins)
+    end
+    if(job.typeFlags['total_tasks'])
+      cardafter+=job.setEnvCommand("TOTAL_TASKS",total_tasks.to_s)+"\n"
     end
 
     ############################################################
