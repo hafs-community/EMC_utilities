@@ -25,7 +25,6 @@ module LSFBatchSys
       cardbegin+="#BSUB -U #{job.queueOptions['reservation']}\n"
     end
 
-    cardbegin+="#BSUB -R affinity[core]\n"
 
     if(queue=='transfer')
       mpi=false
@@ -40,13 +39,20 @@ module LSFBatchSys
     #warn "Nodes: #{job.nodes.length}"
     #warn "Node 0: #{job.nodes[0]}"
 
-    total_tasks=1
+    if(job.cpuPacking)
+      corecpu='cpu'
+    else
+      corecpu='core'
+    end
+
       if(omp)
         # OpenMP job, so specify the threads
         threads=job.ompThreads
+        cardbegin+="#BSUB -R affinity[#{corecpu}(#{threads})]\n"
       else
         # Not an OpenMP job, so only one thread per process
         threads=1
+        cardbegin+="#BSUB -R affinity[#{corecpu}]\n"
       end
 
     # STEP 1: Generate the node/processor/thread configuration
@@ -59,12 +65,10 @@ module LSFBatchSys
       nodes=0  # number of nodes requested
       placement='' # processor placement string
       ip=0     # processor index
-      total_tasks=0
       job.nodes.each { |nodespec|
         nodeArray=nodespec.spreadNodes(ppn,threads)
         fail "empty nodeArray" if nodeArray.empty?
         nodes+=nodeArray.length
-        total_tasks+=nodespec.totalRanks()
         nodeArray.each { |procs|
           if(procs<1)
             fail "internal error: somehow procs<1 (procs=#{procs})"
@@ -161,9 +165,6 @@ module LSFBatchSys
       cpumins=cputime-cpuhrs*60
       cardbegin+=sprintf("#BSUB -c %02d:%02d\n",cpuhrs,cpumins)
     end
-    if(job.typeFlags['total_tasks'])
-      cardafter+=job.setEnvCommand("TOTAL_TASKS",total_tasks.to_s)+"\n"
-    end
 
     ############################################################
     ## SET WORKING DIRECTORY
@@ -179,23 +180,25 @@ module LSFBatchSys
 
     if(omp) then
       cardafter+=job.setEnvCommand("OMP_NUM_THREADS",threads)+"\n"
+      cardafter+=job.setEnvCommand("MKL_NUM_THREADS",'1')+"\n"
     end
     if(job.typeFlags['diskintensive'])
       cardafter+=job.setEnvCommand("MP_USE_BULK_XFER","yes")+"\n"
     end
-    if(omp) then
-      if(job.cpuPacking)
-        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'"cpu:'+threads.to_s+'"')+"\n"
-      else
-        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'"core:'+threads.to_s+'"')+"\n"
-      end
-    else
-      if(job.cpuPacking)
-        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'cpu')+"\n"
-      else
-        cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'core')+"\n"
-      end
-    end
+    # No longer used on WCOSS:
+    # if(omp) then
+    #   if(job.cpuPacking)
+    #     cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'"cpu:'+threads.to_s+'"')+"\n"
+    #   else
+    #     cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'"core:'+threads.to_s+'"')+"\n"
+    #   end
+    # else
+    #   if(job.cpuPacking)
+    #     cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'cpu')+"\n"
+    #   else
+    #     cardafter+=job.setEnvCommand("MP_TASK_AFFINITY",'core')+"\n"
+    #   end
+    # end
 
     if(mpi)
       cardafter+=job.setEnvCommand("MP_EUIDEVICE","sn_all")+"\n"
