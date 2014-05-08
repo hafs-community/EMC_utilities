@@ -550,12 +550,14 @@ void walk_impl(size_t pathlen,DIR *d,size_t depth,
   /* If deletions are enabled, indicate whether this directory's
      entire contents have been deleted. */
 #ifdef ENABLE_DELETION
-  if(deletions>=files_seen) {
-    debug("%s: deleted all files\n",pathbuf);
-    *emptied=1;
-  } else {
-    debug("%s: %llu of %llu files not deleted\n",pathbuf,deletions,files_seen);
-    *emptied=0;
+  if(delete_files) {
+    if(deletions>=files_seen) {
+      debug("%s: deleted all files\n",pathbuf);
+      *emptied=1;
+    } else {
+      debug("%s: %llu of %llu files not deleted\n",pathbuf,deletions,files_seen);
+      *emptied=0;
+    }
   }
 #else
   *emptied=0;
