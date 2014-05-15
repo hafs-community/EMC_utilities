@@ -93,6 +93,7 @@ static int print_stats=0; /* do we calculate and print speed statistics */
 
 #ifdef ENABLE_DISK_USAGE
 static int disk_usage=0; /* do we calculate disk usage statistics */
+static int disk_usage_all=0; /* turns on -u for all search paths */
 #endif
 
 /* if >MIN_THROTTLE, we throttle processing speed.  See throttle() for
@@ -189,13 +190,13 @@ static void file_found(const char *filename,const struct stat *filestat) {
 #ifdef ENABLE_SPEED_STATS
     if(print_stats) {
       if(inited)
-        printf("Did %llu files (%llu changes) in %.3f sec (%.2f/sec avg, %.2f/sec recently)...\n",
+        printf("Scanned %llu files (%llu changes) in %.3f sec (%.2f/sec avg, %.2f/sec recently)...\n",
                (unsigned long long)file_count,
                (unsigned long long)(setgid_count+chgrp_count+acl_count+del_count),
                now-start_time,file_count/(now-start_time-sleep_time),
                (file_count-last_count)/(now-last_time));
       else
-        printf("Did %llu files (%llu changes) in %.3f sec (%.2f/sec avg)...\n",
+        printf("Scanned %llu files (%llu changes) in %.3f sec (%.2f/sec avg)...\n",
                (unsigned long long)file_count,
                (unsigned long long)(setgid_count+chgrp_count+acl_count+del_count),
                now-start_time,file_count/(now-start_time-sleep_time));
@@ -598,7 +599,15 @@ This routine does not return.
 */
 void usage(const char *exename,const char *message) {
   fprintf( ( (message==NULL) ? stdout : stderr ),
-           "Syntax: %s [-g group] [-r rstprod]\n"
+           "Syntax: %s [options] /dir/to/process /another/dir/to/process\n"
+           "\n"
+           "  Recurses through directories on a Lustre filesystem, performing various\n"
+           "  operations, including:\n"
+           "    1. Correcting group IDs and other permission issues\n"
+           "    2. Deleting files older than a certain age\n"
+           "    3. Keeping track of disk usage statistics\n"
+           "  All of these operations are disabled by default, and must be\n"
+           "  enabled using the options below.\n"
            "\n"
            "  -g group -- chgrp everything to this group, and\n"
            "              set the setgid bit on directories\n"
@@ -608,30 +617,42 @@ void usage(const char *exename,const char *message) {
            "  -v -- be verbose.\n"
            "  -q -- silent mode; print nothing other than fatal\n"
            "        errors"
-           "  -L -- disable use of Lustre stat.  Don't use this except for\n"
-           "        speed tests; it will slow down the program by a lot.\n"
-           "  -l -- enable use of Lustre stat.  This is on by default.\n"
 #ifdef ENABLE_SPEED_STATS
            " and final stats (if -s is given).\n"
+#else
+           "\n"
+#endif /* ENABLE_SPEED_STATS */
+           "  -L -- disable use of Lustre stat.  This is slow, but provides\n"
+           "        correct timestamps and file sizes.\n"
+           "  -l -- enable use of Lustre stat.  This is fast, but has old\n"
+           "        timestamps and file sizes.  File sizes are usually zero.\n"
+           " NOTE: By default, the code chooses between Lustre and non-Lustre\n"
+           "       stat based on whether it needs file sizes or timestamps.\n"
+           "       Only use -l or -L if you want to override that decision.\n"
+#ifdef ENABLE_SPEED_STATS
            "  -s -- print speed statistics.\n"
 #endif /* ENABLE_SPEED_STATS */
 #ifdef ENABLE_DISK_USAGE
-           "  -u /path/to/directory -- keep track of disk usage\n"
-           "        within this directory.  You may specify -u any\n"
+           "  -u /path/to/directory -- treat this as a directory set for disk\n"
+           "        usage reporting.  Does NOT add this directory to the list\n"
+           "        of directories to be scanned.  You may specify -u any\n"
            "        number of times.\n"
+           "  -U -- all directories specified on the command line are directory\n"
+           "        sets for the purposes of disk usage reporting.\n"
            "  -b bytesize -- set the size of a file that is considered\n"
            "        \"big\" for the purposes of disk usage accounting\n"
-           "        (meaningless without -u).\n"
-           "  -x /prefix/for/xml/reports -- prefix to prepend to filenames\n"
-           "        of files that will contain XML reports of usage stats.\n"
-           "        This option is meaningless without -u\n"
+           "        (meaningless without -u or -U).\n"
+           "  -x /prefix/for/usage/reports -- prefix to prepend to filenames\n"
+           "        of files that will contain reports of usage stats.\n"
+           "        This option is meaningless without -u  or -U\n"
            "  -F -- also generate a list of all files and some attributes\n"
+           "        This option has no effect without -u or -U\n"
 #endif /* ENABLE_DISK_USAGE */
 #ifdef ENABLE_DELETION
            "  -d days -- delete everything older than this number of days.\n"
-           "        Fractions are okay.\n"
+           "        Fractions are okay.  Cannot use with -L\n"
            "  -D mindepth -- do not delete anything less than this depth\n"
-           "        within the file tree.\n"
+           "        within the file tree.  Useless without -d\n"
 #endif
 #ifdef ENABLE_CHECK_DUP
            "  -n -- disable checking for duplicate files (hard links).  This\n"
@@ -653,7 +674,7 @@ void usage(const char *exename,const char *message) {
 
 
 int main(int argc,char **argv) {
-  int opt,arg;
+  int opt,arg, have_set_lustre_stat=0, need_sizes_times=0;
   double end;
 
   /* Calculate argument list to send to getopt */
@@ -662,7 +683,7 @@ int main(int argc,char **argv) {
     "s"
 #endif
 #ifdef ENABLE_DISK_USAGE
-    "u:x:b:F"
+    "Uu:x:b:F"
 #endif
 #ifdef ENABLE_DELETION
     "d:D:"
@@ -681,16 +702,34 @@ int main(int argc,char **argv) {
       rstprod=optarg;
       break;
     case 'h': usage(argv[0],NULL); break;
-    case 'l': set_use_lustre_stat(1); break;
-    case 'L': set_use_lustre_stat(0); break;
+    case 'l': 
+      set_use_lustre_stat(1); 
+      have_set_lustre_stat=1;
+      break;
+    case 'L': 
+      set_use_lustre_stat(0); 
+      have_set_lustre_stat=1;
+      break;
     case 'v': increment_verbosity(); break;
     case 'q': set_verbosity(VERB_FATAL); break;
 #ifdef ENABLE_SPEED_STATS
     case 's': print_stats=1; break;
 #endif /* ENABLE_SPEED_STATS */
 #ifdef ENABLE_DISK_USAGE
-    case 'b': us_set_big_file_size((size_t)atoll(optarg)); break;
-    case 'u': us_add_dir(optarg); disk_usage=1; break;
+    case 'b':
+      us_set_big_file_size((size_t)atoll(optarg));
+      need_sizes_times=1;
+      break;
+    case 'u': 
+      us_add_dir(optarg); 
+      disk_usage=1; 
+      need_sizes_times=1;
+      break;
+    case 'U':
+      disk_usage=1;
+      need_sizes_times=1;
+      disk_usage_all=1;
+      break;
     case 'x': xml_pre=optarg; break;
     case 'F': us_list_all_files(1); break;
 #endif /* ENABLE_DISK_USAGE */
@@ -700,6 +739,7 @@ int main(int argc,char **argv) {
       if(delete_age<=0)
         delete_age=1;
       delete_files=1;
+      need_sizes_times=1;
       break;
     case 'D': 
       delete_min_depth=atoll(optarg);
@@ -718,7 +758,7 @@ int main(int argc,char **argv) {
 
   /* Check arguments */
   if(optind>=argc)
-    usage(argv[0],"Specify at least one directory.\n");
+    usage(argv[0],"\n\nERROR: Specify at least one directory.\n");
 
   if(rstprod_gid!=INVALID_GID)
     init_acls(rstprod);
@@ -728,9 +768,25 @@ int main(int argc,char **argv) {
     us_start_reports(xml_pre,start_time,MAX_PATH_DEPTH);
 #endif /* ENABLE_DISK_USAGE */
 
+  /* If the user did not select a stat implementation, set one based
+     on whether we need sizes or times */
+  if(!have_set_lustre_stat)
+    set_use_lustre_stat(!need_sizes_times);
+
+#ifdef ENABLE_DELETION
+  if(delete_files && get_use_lustre_stat()) {
+    fail("Error: when deleting files, you must not use -l (enable Lustre stat).  Lustre's metadata server has very out-of-date timestamps, so many files that should not be deleted, will be deleted, with -l.\n");
+  }
+#endif /* ENABLE_DELETION */
 
   /* Record walking start time */
   start_time=fulltime();
+
+#ifdef ENABLE_DISK_USAGE
+  if(disk_usage && disk_usage_all)
+    for(arg=optind;arg<argc;arg++)
+      us_add_dir(argv[arg]);
+#endif /* ENABLE_DISK_USAGE */
 
   /* Loop over all given directories */
   for(arg=optind;arg<argc;arg++)
@@ -748,9 +804,11 @@ int main(int argc,char **argv) {
   /* Output final speed statistics, if requested */
 #ifdef ENABLE_SPEED_STATS
   if(print_stats) {
-    printf("Processed %llu files in %f seconds, sleeping %llu seconds (%f files per second)\n",
+    printf("Processed %llu files in %f seconds, sleeping %llu seconds (%f files per second) %s\n",
            (unsigned long long)file_count,end-start_time,(unsigned long long)sleep_time,
-           file_count/(end-start_time-sleep_time));
+           file_count/(end-start_time-sleep_time),
+           ( (get_use_lustre_stat()) ? ("using Lustre stat") : ("using full stat") )
+           );
     printf("  setgid         ... %llu times\n"
            "  chgrp          ... %llu times\n"
            "  tagged rstprod ... %llu times\n"
