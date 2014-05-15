@@ -7,7 +7,7 @@ CXXFLAGS=-Wall -W -O3 -I. -Wno-deprecated
 LIBS=-lacl
 
 OBJS=main.o disk_usage.o check_dup.o basic_utils.o paranoia.o
-EXE=lustre-walker
+EXE=../../bin/lustre-walker
 
 all: $(EXE)
 clean:
@@ -26,6 +26,6 @@ check_dup.o: check_dup.c++ Makefile
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(EXE): $(OBJS)
-	$(CXX) $(CXXFLAGS) $(LIBS) -o lustre-walker $(OBJS)
+	$(CXX) $(CXXFLAGS) $(LIBS) -o $(EXE) $(OBJS)
 
 
