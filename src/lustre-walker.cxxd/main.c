@@ -1,3 +1,7 @@
+/* Lustre Walker by Sam Trahan: walks a lustre filesystem, providing
+   disk usage statistics, speed statistics, deleting files and
+   correcting errors in file metadata. */
+
 /* Enable GNU-specific and Linux-specific routines */
 #define _GNU_SOURCE
 #define _ATFILE_SOURCE
