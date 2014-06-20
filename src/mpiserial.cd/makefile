@@ -9,12 +9,12 @@ CMD=		../../bin/mpiserial
 #CFLAGS=		-DMPI_ABORT_FOR_NONZERO_EXIT
 
 # IFORT OR XLC WITH IBM POE (Tide, Gyre, Cirrus, Stratus)
-CC=		mpcc
-CFLAGS=		
+#CC=		mpcc
+#CFLAGS=		
 
 # IFORT WITH INTEL MPI (Jet):
-#CC=		mpicc
-#CFLAGS=		
+CC=		mpicc
+CFLAGS=		
 
 # CRAY "cc" C COMPILER WRAPPER (GAEA):
 #CC=		cc

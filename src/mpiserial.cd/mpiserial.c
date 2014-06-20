@@ -124,6 +124,15 @@ void mpicall(int ret,const char *name) {
   }
 }
 
+int scr_immediate_exit(void) {
+  char *ie;
+  ie=getenv("SCR_IMMEDIATE_EXIT");
+  if(!ie) return 0;
+  if(!strcmp(ie,"YES"))
+    return 1;
+  return 0;
+}
+
 int is_spmd(const int argc,const int rank) {
   /* Decides if the program is called in SPMD mode.  Returns 1 for
      SPMD, 0 for MPMD and aborts if unsure. */
@@ -398,6 +407,14 @@ int main(int argc,char **argv) {
     if(argc>1)
       die("ERROR.  Do not specify arguments in MPMD mode.\n");
     rc=mpmd_run(argc,(const char**)argv,rank);
+  }
+
+  /* Exit immediately if non-zero exit status and
+     SCR_IMMEDIATE_EXIT=YES */
+  if(rc && scr_immediate_exit()) {
+    fprintf(stderr,"%s: exit status was %d and SCR_IMMEDIATE_EXIT is enabled.  Calling MPI_Abort.\n",argv[0],rc);
+    mpicall(MPI_Abort(MPI_COMM_WORLD,255),"calling MPI_Abort");
+    return 255;
   }
  
   /* Determine the maximum return code */
