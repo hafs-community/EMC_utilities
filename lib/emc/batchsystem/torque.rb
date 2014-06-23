@@ -122,24 +122,26 @@ module TorqueBatchSys
       fail "Internal error: nodes!=allprocs.length (#{nodes}!=#{allprocs.length})"
     end
 
-    if(allowProcs?() && job.nodes.length==1 && job.nodes[0].singleSpec?)
-      # Special case: only one MPI rank requested.  We need to handle
-      # job exclusivity and OpenMP specially on the NOAA Jet and Zeus
-      # clusters since single proc jobs are not given an exclusive
-      # node (even when #PBS -n is specified).
+    didit=false
+
+    # Attempt to use -l procs if possible and safe:
+    if(allowProcs?() && job.nodes[0].singleSpec?() && job.nodes.length==1)
       procs=job.nodes[0].singleSpec
-      if(procs==1)
-        if(job.exclusive?)
-          cardbegin+="#PBS -l nodes=1:ppn=#{[2,threads].max()}\n"
+      if(procs==1 && threads==1)
+        if (job.exclusive?)
+          cardbegin+="#PBS -l procs=2\n"
         else
-          cardbegin+="#PBS -l nodes=1:ppn=#{[1,threads].max()}\n"
+          cardbegin+="#PBS -l procs=1\n"
         end
-      else
-        cardbegin+="#PBS -l procs=#{procs}\n"
+        didit=true
+      elsif(procs<maxAllow)
+        cardbegin+="#PBS -l procs=#{procs*threads}\n"
+        didit=true
       end
-    elsif(!allowProcs?() && job.nodes.length==1 && job.nodes[0].singleSpec? && job.nodes[0].singleSpec()==1)
-      cardbegin+="#PBS -l nodes=1:ppn=#{maxAllow}\n"
-    else
+    end
+
+    # If we could not use -l procs, use -l nodes:
+    if(!didit)
       cardbegin+="#PBS -l nodes=";
       prev=0  # number of ppn in previous node
       accum=0 # number of times that occurred in sequence
