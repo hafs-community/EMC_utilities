@@ -104,7 +104,7 @@ module JetQueuePartition
     if (m)
       return p,m[1] # nil,"rtujet" becomes "rtujet","ujet"
     elsif p=='service'
-      return 'service',nil
+      return nil,'service'
     else
       return nil,p  # nil,"ujet" becomes nil,"ujet"
     end
