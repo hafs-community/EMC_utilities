@@ -21,7 +21,7 @@ my $cycling_hour_step=6;
 
 # All recognized commands in rttrans2 input files:
 my %all_commands;
-foreach (qw{ lib let start do end fileset file hourly
+foreach (qw{ lib let start do end fileset file hourly loop
              transfer run target source times config }) {
   $all_commands{$_}=1;
 }
@@ -352,7 +352,7 @@ sub hourly {
         verbose " ... accept.\n";
         push @fileset,{%t};
       } elsif (defined($all_commands{$cmd})) {
-        warn "Syntax error: line $line: $cmd commands are not allowed in an hourly block.\n"
+        warn "Syntax error: line $line: $cmd commands are not allowed in an hourly or loop block.\n"
       } else {
         warn "Syntax error: line $line: ignoring unknown command $cmd.\n"
       }
@@ -453,7 +453,7 @@ sub doit {
         $fileset_name=var_sub($vars,$arg);
         @fileset=();
         $mode='fileset';
-      } elsif ($cmd eq 'hourly') {
+      } elsif ($cmd eq 'hourly' || $cmd eq 'loop') {
         $linestart=$line+1;
         %hourlyopt=parse_opts($vars,$opts,$line);
         $fileset_name=var_sub($vars,$arg);
@@ -495,13 +495,13 @@ sub doit {
         $bad=uc($cmd);
         warn "Error at line $line: $bad commands are not valid in the global scope.\n";
       }
-    } elsif ($mode eq 'hourly') {
+    } elsif ($mode eq 'hourly' || $mode eq 'loop') {
       if ($cmd eq 'end') {
         $mode='global';
         @fileset=hourly($vars,\@lines,$linestart,$cycle,%hourlyopt);
         $filesets{$fileset_name}=[@fileset];
       } else {
-        verbose "ADD LINE TO HOURLY BLOCK: ($fileset_name)($_)\n";
+        verbose "ADD LINE TO HOURLY OR LOOP BLOCK: ($fileset_name)($_)\n";
         push @lines,$_;
       }
     } elsif ($mode eq 'start' || "$mode" eq 'start_ignore') {
@@ -830,7 +830,7 @@ sub get_config {
           verbose "LETTING $k = $o{$k}\n";
           $vars->{$k}=$o{$k};
         }
-      } elsif ($cmd eq 'fileset' || $cmd eq 'hourly' || $cmd eq 'start') {
+      } elsif ($cmd eq 'fileset' || $cmd eq 'hourly' || $cmd eq 'loop' || $cmd eq 'start') {
         $depth++;
         next;
       } elsif ($cmd eq 'config') {
