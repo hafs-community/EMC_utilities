@@ -85,18 +85,28 @@ module JetQueuePartition
       if(partition.nil?)
         fail "You must specify either the queue or partition on Jet."
       else
-        return nil,partition
+        q,p = nil,partition
       end
     else
       if(partition.nil?)
-        return nil,queue
+        q,p = nil,queue
       else
         if(partition==queue)
-          return nil,queue
+          q,p = nil,queue
         else
-          fail "On Jet, you must specify the queue or partition, but not both.  You specified both, but they do not match (queue=#{queue} and partition=#{partition})."
+          return queue,partition
         end
       end
+    end
+
+    # Try to guess the queue and partition based on the input
+    m = /^rt(.*)/.match(p)
+    if (m)
+      return p,m[1] # nil,"rtujet" becomes "rtujet","ujet"
+    elsif p=='service'
+      return 'service',nil
+    else
+      return nil,p  # nil,"ujet" becomes nil,"ujet"
     end
   end
 end
