@@ -134,7 +134,7 @@ module TorqueBatchSys
           cardbegin+="#PBS -l procs=1\n"
         end
         didit=true
-      elsif(procs<maxAllow)
+      elsif(procs<=maxAllow)
         cardbegin+="#PBS -l procs=#{procs*threads}\n"
         didit=true
       elsif(threads==1)
