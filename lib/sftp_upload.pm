@@ -23,17 +23,45 @@ sub lworkname  { $_[0]->{local_temp}.$_[0]->{trnsid}.'.'.  basename($_[1])  .'.t
 
 sub require_path {
     my ($self,$path)=@_;
+    my ($maxtries,$i,$success,$sleeptime,$itry);
+    $maxtries=3;
+    $sleeptime=3; # seconds
     my $f=$self->{sftp}->stat($path);
+
     if(defined($f)) {
         if(!S_ISDIR($f->perm)) {
             die "Remote target $path exists but is not a directory.\n";
         } else {
             warn "Target $path exists and is a directory.\n";
+            return;
         }
     } else {
-        warn "Target $path does not exist so I will make it.\n";
-        $self->{sftp}->mkpath($path);
+        warn "Target path does not exist; will try up to $maxtries times to make it: $path\n";
     }
+
+    for($i=0;$i<$maxtries;$i++) {
+        $itry=$i+1;
+        warn "Attempt #$itry to make dir $path\n";
+        $self->{sftp}->mkpath($path);
+
+        $f=$self->{sftp}->stat($path);
+        if(defined($f)) {
+            if(!S_ISDIR($f->perm)) {
+                die "Remote target $path exists but is not a directory.\n";
+            } elsif($i==1) {
+                warn "Created directory $path after 1 try\n";
+            } else {
+                warn "Created directory $path after $itry tries\n";
+            }
+            return;
+        } elsif($itry<$maxtries) {
+            warn "Could not create $path.  Will try again.\n";
+            warn "Sleep $sleeptime before retrying.\n";
+            sleep($sleeptime);
+            warn "Done sleeping.\n";
+        }
+    }
+    die "Could not create $path after $maxtries tries.\n";
 }
 
 ########################################################################
