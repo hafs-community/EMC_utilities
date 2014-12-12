@@ -378,6 +378,8 @@ sub doit {
   my $mode='global';
 
   $vars->{cycle}=$cycle;
+  $vars->{nextyear}=substr($cycle,0,4)+1;
+  $vars->{prevyear}=substr($cycle,0,4)-1;
   $vars->{prev}=cycle_plus($cycle,-$cycling_hour_step);
   $vars->{next}=cycle_plus($cycle,$cycling_hour_step);
 
@@ -388,6 +390,7 @@ sub doit {
   }
 
   print "cycle=($vars->{cycle}) prev=($vars->{prev}) next=($vars->{next})\n";
+  print "prevyear=($vars->{prevyear}) nextyear=($vars->{nextyear})\n";
     
   my $global_start_okay=1; # okay  to start according to global start blocks?
   my $start_okay=1;          # temporary variable used by start blocks
@@ -650,6 +653,9 @@ sub doit {
       die $@ if($@ ne '');
       die "Please specify the destination machine" if(!defined($target{machine}));
       die "Please specify the destination directory" if(!defined($target{remotedir}));
+      if(defined($source{localdir}) && !defined($target{localdir})) {
+          $target{localdir}=$source{localdir};
+      }
       $trans=sftp_upload->new($target{machine},$target{remotedir},%target);
     } elsif ($source{type} eq 'ftp' && $target{type} eq 'disk') {
       eval "use ftp_download";
@@ -800,6 +806,8 @@ sub get_config {
   $vars->{cycle}=1970010100;
   $vars->{prev}=1970010100;
   $vars->{next}=1970010100;
+  $vars->{prevyear}=1970;
+  $vars->{nextyear}=1970;
   $vars->{sig}=$program_signature;
   for (my $line=1;$line<=$#{$lines}+1;$line++) {
     $_=$lines->[$line-1];
