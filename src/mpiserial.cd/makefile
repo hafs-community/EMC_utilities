@@ -2,7 +2,7 @@ SHELL=		/bin/sh
 SRCS=		mpiserial.c
 OBJS=		mpiserial.o
 LSTS=		mpiserial.lst
-CMD=		../../bin/mpiserial
+CMD=		mpiserial
 
 # IFORT WITH SGI MPT (Zeus):
 #CC=		mpicc

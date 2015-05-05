@@ -29,6 +29,9 @@ AUTHORSHIP:
  2013 March - "Merged" version tested on Tide, Gyre, GAEA, Zeus, Jet,
    Cirrus and Stratus and finalized.
 
+ 2015 April - Sam Trahan added optional verbosity and a workaround for
+   an LSF signal handling issue
+
 ---------
 
 CALLING CONVENTION: This program can be called in one of two different
@@ -85,12 +88,25 @@ non-zero status.
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <ctype.h>
 
 static const int max_command_len=1048576; /* Limit command length to avoid buffer overflow attacks */
 
-static int mpi_inited=0, mpi_rank=-99;
+static int mpi_inited=0, mpi_rank=-99, verbosity=0;
 static const char * const  default_cmdfile="cmdfile"; /* default cmdfile name */
 static const char * const  special_non_command="***"; /* don't run a command, exit 0 */
+
+void message(int level,const char *format,...) {
+  /* Debug message function.  Will print the message to stderr only if
+     level<=verbosity. */
+  va_list ap;
+
+  va_start(ap,format);
+  if(level<=verbosity)
+    vfprintf(stderr,format,ap);
+  va_end(ap);
+}
 
 void die(const char *format,...) {
   /* Error handling function.  Exits program with a message, calling
@@ -122,6 +138,20 @@ void mpicall(int ret,const char *name) {
           ret,name,err2);
     }
   }
+  if(mpi_rank<0)
+    message(2,"MPI Serial: %s successful.\n",name);
+  else
+    message(2,"MPI Serial %d: %s successful.\n",mpi_rank,name);
+}
+
+int scr_verbosity(void) {
+  char *cverb;
+  int verbosity=0;
+  cverb=getenv("SCR_VERBOSITY");
+  if(!cverb) 
+    return verbosity;
+  sscanf(cverb,"%d",&verbosity); /* on failure, sscanf will not modify verbosity */
+  return verbosity;
 }
 
 int scr_immediate_exit(void) {
@@ -155,6 +185,51 @@ int is_spmd(const int argc,const int rank) {
   }
   mpicall(MPI_Bcast(&spmd,1,MPI_INTEGER,0,MPI_COMM_WORLD),"calling MPI_Bcast");
   return spmd;
+}
+
+int haveenv(const char *c) {
+  /* Returns 1 if the specified variable exists and consists of more
+     than just blank characters.  Returnsn 0 otherwise. */
+  char *val=getenv(c);
+  if(!val || !*val)
+    return 0;
+  while(*val) {
+    if(!isblank(*val))
+      return 1;
+    val++;
+  }
+  return 0;
+}
+
+void lsf_signal_workaround() {
+  int isig;
+  int lsf=0;
+  
+  /* Decide if we are using LSF */
+  lsf+=haveenv("LSB_JOBNAME");
+  lsf+=haveenv("LSB_HOSTS");
+  lsf+=haveenv("LSB_JOBINDEX");
+  lsf+=haveenv("LSB_SUB_USER");
+  lsf+=haveenv("LSB_TRAPSIGS");
+  lsf+=haveenv("LSF_VERSION");
+  lsf+=haveenv("LSF_INVOKE_CMD");
+  lsf+=haveenv("LSF_BINDIR");
+  lsf=(lsf>=2); /* Require at least two recognized variables */
+  
+  if(!lsf) {
+    if(mpi_rank>=0)
+      message(2,"MPI Serial %d: not using LSF, retain signal handling setup\n",mpi_rank);
+    else
+      message(2,"MPI Serial: not using LSF, retain signal handling setup\n");
+  }
+
+  if(mpi_rank>=0)
+    message(2,"MPI Serial %d: restoring signal handlers 1-63 to work around LSF bug\n",mpi_rank);
+  else
+    message(2,"MPI Serial: restoring signal handlers 1-63 to work around LSF bug\n");
+
+  for(isig=1;isig<=63;isig++)
+    signal(isig,SIG_DFL);
 }
 
 char *append_args(const int argc,const char **argv) {
@@ -202,17 +277,23 @@ unsigned int run(const char *command) {
   if(!strcmp(command,special_non_command))
     return 0;
 
+  message(1,"MPI Serial %d: system(\"%s\")\n",mpi_rank,command);
   ret=system(command);
   if(ret==-1)
-    die("Unable to run system(\"%s\"): %s\n",command,strerror(errno));
-  else if(WIFEXITED(ret))
+    die("MPI Serial %d: Unable to run system(\"%s\"): %s\n",mpi_rank,command,strerror(errno));
+  else if(WIFEXITED(ret)) {
     rc=(unsigned int)WEXITSTATUS(ret);
-  else if(WIFSIGNALED(ret))
+    message(1,"MPI Serial %d: exit %d\n",mpi_rank,rc);
+  } else if(WIFSIGNALED(ret)) {
     rc=(unsigned int)(128+WTERMSIG(ret));
-  else if(WIFSTOPPED(ret))
+    message(1,"MPI Serial %d: signal %d\n",mpi_rank,WTERMSIG(ret));
+  }  else if(WIFSTOPPED(ret)) {
     rc=(unsigned int)(128+WSTOPSIG(ret));
-  else
+    message(1,"MPI Serial %d: stopped by signal %d\n",mpi_rank,WSTOPSIG(ret));
+  } else {
+    message(1,"MPI Serial %d: unrecognized return status %d (not -1, not exited, not signalled, not stopped)\n",mpi_rank,ret);
     rc=255;
+  }
 
   if(rc>255) rc=255;
 
@@ -377,10 +458,13 @@ int main(int argc,char **argv) {
   unsigned int rc;
   int maxcode,mycode,spmd,mpmd,commsize;
 
+  verbosity=scr_verbosity();
+
   mpicall(MPI_Init( &argc, &argv ),"calling MPI_Init");
   mpi_inited=1; /* indicate to "die" that MPI_Init was called */
 
   hydra_workaround(); /* make sure stdin is not a directory */
+  lsf_signal_workaround(); /* when using LSF, restore all signals */
 
   /* Enable MPI error handling so that we can give intelligent error messages */
   mpicall(MPI_Errhandler_set(MPI_COMM_WORLD, MPI_ERRORS_RETURN),"initializing mpi error handler");
@@ -398,14 +482,21 @@ int main(int argc,char **argv) {
   /* Set the $SCR_COMM_RANK and $SCR_COMM_SIZE environment variables */
   set_comm_size_rank(commsize,rank);
 
+  message(1,"MPI Serial %d: MPI_COMM_WORLD size=%d rank=%d\n",
+          rank,commsize,rank);
+  message(2,"MPI Serial %d: high verbosity enabled (SCR_VERBOSITY=%d)\n",
+          rank,verbosity);
+
   /* Run the command */
   if(spmd) {
     if(argc<2)
       die("Incorrect format for SPMD mode.  Format: %s command to run\nWill run the command on all MPI ranks and exit with highest error status.\n",argv[0]);
+    message(2,"MPI Serial %d: SPMD mode.\n",mpi_rank);
     rc=spmd_run(argc,(const char**)argv,rank);
   } else {
     if(argc>1)
       die("ERROR.  Do not specify arguments in MPMD mode.\n");
+    message(2,"MPI Serial %d: MPMD mode.\n",mpi_rank);
     rc=mpmd_run(argc,(const char**)argv,rank);
   }
 
@@ -420,7 +511,9 @@ int main(int argc,char **argv) {
   /* Determine the maximum return code */
   mycode=rc;
   maxcode=255;
+  message(2,"MPI Serial %d: get max return code (local=%d)\n",mpi_rank,mycode);
   mpicall(MPI_Allreduce(&mycode,&maxcode,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD),"using an mpi_allreduce to get the maximum return code");
+  message(1,"MPI Serial %d: max return code is %d\n",mpi_rank,maxcode);
 
 #ifdef MPI_ABORT_FOR_NONZERO_EXIT
   if(mpi_rank==0 && maxcode!=0)  
