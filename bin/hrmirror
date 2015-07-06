@@ -722,6 +722,7 @@ sub doit {
         my $fn;
 
         while (( $first==1 || %remain) && $tries < $vars->{max_tries}) {
+            print "Still need: ".join(', ',sort { $a cmp $b } keys %remain )."\n";
           my $runtime=time()-$start_time;
           my $local_runtime=time()-$local_start;
           $tries=$tries+1;
