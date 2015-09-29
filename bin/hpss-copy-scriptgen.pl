@@ -160,7 +160,8 @@ for(my $id=0;$id<=$#archsrc;$id++) {
   warn "... got back $nhsils lines.\n";
   close HSILS;
   foreach $_ (@hsils) {
-    unless(m(^-r\S{8}\s+\S+\s+\S+\s+\S+\s+(\d+).*?([^/ \t]+)(\.tar\.idx|\.tar)?)) {
+      warn "LINE: $_";
+    unless(m(^-r\S{8}\s+\S+\s+\S+\s+\S+\s+(\d+).*?([^/ \t]+?)(\.tar\.idx|\.tar)?\s*$)) {
       warn "Skip line: $_";
       next;
     }
@@ -168,7 +169,7 @@ for(my $id=0;$id<=$#archsrc;$id++) {
     my ($tsize,$tbase,$text)=($1,$2,$3);
     $text='' unless defined $text;
     my $name="$tbase$text";
-    my $tgtfile=djoin($dir,"$tbase.tar");
+    my $tgtfile=djoin($dir,"$tbase$text");
     $tgtfile=~s:^/+::g;
     if($text eq ".tar.idx") {
       $idx{$tgtfile}=$tsize;
