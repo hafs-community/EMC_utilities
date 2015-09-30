@@ -57,6 +57,7 @@ sub djoin($$) {
 
 if ($#ARGV!=2) {
     print "Format: make-hpss-copy-recursive.pl lsout srcdir tgtdir\n";
+    print "Version 1.0.1\n";
     print "  Will send to stdout a shell script to copy HTAR files recursively from srcdir to tgtdir\n";
     print "Arguments:\n";
     print "  lsout -- one of George V's hsi ls outputs\n";
