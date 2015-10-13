@@ -85,7 +85,7 @@ sub parse_arguments_or_abort {
   #  $srcpath - source directory
   #  $tgtpath - target directory
 
-  my($help,$man,$verbose,$quiet,$reindex,$optlogfile,$optstage);
+  my($help,$man,$verbose,$quiet,$optlogfile,$optstage);
   my($optmaxcmd,$optmaxop,$optscript,$opt_no_reindex,$optversion);
   Getopt::Long::Configure ("bundling");
   GetOptions('help|?'      => \&help,
@@ -134,21 +134,17 @@ sub parse_arguments_or_abort {
     verbose 1,"Neither --stage nor --no-stage specified.  Will disable staging by default.\n";
     $stageless=1;
   } elsif($optstage) {
-    verbose 1,"Staging requested ($optstage).  Will use a two-step stage/copy operation.\n";
     $stageless=0;
   } else {
-    verbose 1,"Staging disabled ($optstage).  Will use stageless copies (copy -p -S).\n";
     $stageless=1;
   }
 
   # $maxop and $maxcmd
   if(defined($optmaxop)) {
     $maxop=$optmaxop;
-    verbose 1,"Maximum HSI operations set to $maxop\n";
   }
   if(defined($optmaxcmd)) {
     $maxcmd=$optmaxcmd;
-    verbose 1,"Maximum HSI command length changed to $maxcmd\n";
   }
 
   # $reindex - decide if reindexing is disabled (it is enabled by default)
@@ -169,6 +165,13 @@ sub parse_arguments_or_abort {
 }
 
 parse_arguments_or_abort();
+verbose 1,"Maximum HSI operations set to $maxop\n";
+verbose 1,"Maximum HSI command length set to $maxcmd\n";
+verbose 1,"Re-indexing of HTAR archives is disabled.\n" if !$reindex;
+verbose 1,"Re-indexing of HTAR archives is enabled.\n" if $reindex;
+
+verbose 1,"Staging disabled.  Will use stageless copies (copy -p -S).\n" if $stageless;
+verbose 1,"Staging requested.  Will use hsi stage and copy -p.\n" if !$stageless;
 
 ########################################################################
 
