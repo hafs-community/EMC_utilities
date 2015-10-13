@@ -91,7 +91,7 @@ sub parse_arguments_or_abort {
   GetOptions('help|?'      => \&help,
              'man'         => \$man,
              'verbose|v+'  => \$verbose,
-             'quiet'       => \$quiet,
+             'quiet|q'     => \$quiet,
              'n'           => \$opt_no_reindex,
              'logfile|e:s' => \$optlogfile,
              'm|maxcmd:i'  => \$optmaxcmd,
