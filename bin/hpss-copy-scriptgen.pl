@@ -1,1 +1,1 @@
-hpss-copy-scriptgen-v1.2.0.pl
+hpss-copy-scriptgen-v1.2.1.pl
