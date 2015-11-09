@@ -82,7 +82,7 @@ module EMC
             next
           end
           if(mode=='multiline')
-            matches=/^ {26}(.+)/.match(line)
+            matches=/^ {20,26}(.+)/.match(line)
             if(matches)
               # This is yet another line in a multiline block, so accumulate it.
               # puts "APPEND: #{matches[1]}"
@@ -125,7 +125,7 @@ module EMC
             #                           tion, 448 Processors Requested, Requested Resources <
             #                           span[ptile=4]>;
             #
-            matches=/^([A-Z][a-z][a-z] [A-Z][a-z][a-z] [ 0-9]\d [ 0-9]\d:\d\d:\d\d \d\d\d\d): ([A-Za-z]+)(.*)/.match(line)
+            matches=/^([A-Z][a-z][a-z] [A-Z][a-z][a-z] [ 0-9]\d [ 0-9]\d:\d\d:\d\d(?: \d\d\d\d)?): ([A-Za-z]+)(.*)/.match(line)
             if(matches)
               date=matches[1]
               type=matches[2]
@@ -179,6 +179,7 @@ module EMC
           job['long_state']=status
           # job['state']=status[0..1]
           job['state']=@opts.namemap[nonil(job['long_state'])]
+          # puts "Job #{jobid} long_state #{status} state #{job['state']}"
           job['project']=reggrab(/Project <([^>]+)>/,accum)
           job['group']=job['project']
           job['queue']=reggrab(/Queue <([^>]+)>/,accum)
