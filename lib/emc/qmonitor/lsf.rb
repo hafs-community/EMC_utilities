@@ -75,7 +75,9 @@ module EMC
         jobid=nil  # current job id
         job=nil    # hash with current job's info
         date=nil   # datestamp of this piece of metadata (nil for job header)
+        runlimit=nil
         # puts "START OF PARSING"
+#        hat['CRAYLINUX']='false'
         text.each_line { |line|
           if(line=~/^ *PGID: \d+\s*;\s+PIDs:/)
             # puts "SKIP PGID/PID LINE: #{line}"
@@ -98,18 +100,22 @@ module EMC
             end
           end
 
-          if(line=~/^\s*Job <(\d+)>/)
+          if(line=~/^\s*(\d+(?:\.\d*)?) min of/)
+            runlimit=$1.to_f
+            #puts("RUNLIMIT = #{runlimit}")
+          elsif(line=~/^\s*Job <(\d+)>/)
             # new job found.  Example:
             # Job <67340>, Job Name <t878_72hr_1>, User <ibmatp>, Project <default>, Status <
             #                           RUN>, Queue <hpc_ibm>, Command <#! /bin/bash;#BSUB -a
             #                            poe;#BSUB -J t878_72hr_1;#BSUB -n 448;#BSUB -R span[
             #                           ptile=4];#BSUB -x;#BSUB -o t878.72hr_1.stdout.%J;#BSU
-            # puts "NEW JOB: #{line}"
+            #puts "NEW JOB: #{line}"
             accum=line.chomp
             mode='multiline'
             head='Job'
             if(!jobid.nil?) # store the old job if this isn't the first
               # puts "STORE #{jobid}"
+              job['lsf/runlimit']=runlimit.to_s if(!runlimit.nil?)
               hat[jobid]=finishParsingJob(jobid,job)
               jobid=nil
               job=nil
@@ -125,17 +131,17 @@ module EMC
             #                           tion, 448 Processors Requested, Requested Resources <
             #                           span[ptile=4]>;
             #
-            matches=/^([A-Z][a-z][a-z] [A-Z][a-z][a-z] [ 0-9]\d [ 0-9]\d:\d\d:\d\d(?: \d\d\d\d)?): ([A-Za-z]+)(.*)/.match(line)
+            matches=/^([A-Z][a-z][a-z] [A-Z][a-z][a-z] [ 0-9]\d [ 0-9]\d:\d\d:\d\d(?: \d\d\d\d)?): ([A-Za-z_]+)(.*)/.match(line)
             if(matches)
               date=matches[1]
               type=matches[2]
-              if(type=='Submitted' || type=='Started' || type=='Resource')
+              if(type=='Submitted' || type=='Started' || type=='Resource' || type=='reservation_id' || type=='Dispatched')
                 mode='multiline'
                 head=type
                 accum=matches[2].to_s+matches[3]
-                # puts "IS A #{head} MULTILINE START: #{line}"
+                #puts "IS A #{head} MULTILINE START: #{line}"
               else
-                # puts "IGNORING (bad type): #{line}"
+                #puts "IGNORING (bad type '#{type}'): #{line}"
               end
             else
               # puts "IGNORING (not date/type header): #{line}"
@@ -143,10 +149,15 @@ module EMC
           end
         }
         if(mode=='multiline')
+          if head=='Job':
+              runlimit=nil
+            #puts("RUNLIMIT RESET FOR JOB #{jobid}")
+          end
           jobid,job = block2info(accum,head,date,jobid,job)
         end
         if(!jobid.nil? && !job.nil?)
-          # puts "STORE #{jobid} AT END"
+          #puts "STORE #{jobid} AT END"
+          job['lsf/runlimit']=runlimit.to_s if(!runlimit.nil?)
           hat[jobid]=finishParsingJob(jobid,job)
         end
 
@@ -157,6 +168,20 @@ module EMC
       def finishParsingJob(jobid,job)
         cwd=job['lsf/submissionCWD']
         cwd=job['lsf/executionCWD'] if cwd.nil?
+        if job['state']=='R' && job['lsf/CRAYLINUX']=='true'
+          if job['reservation'].nil? || job['reservation']==''
+            job['long_state']='ErroneousRunning'
+            job['state']='ER'
+          elsif not job['lsf/runlimit'].nil? and \
+                not job['lsf/time/reservation'].nil?
+            age=Time.new.to_i-job['lsf/time/reservation'].to_i
+            runlimit=job['lsf/runlimit'].to_i*60
+            if age > runlimit+6*3600
+              job['long_state']='ZombieRunning'
+              job['state']='ZR'
+            end
+          end
+        end
         job['workdir']=cwd
         return job
       end
@@ -190,6 +215,16 @@ module EMC
             job['lsf/interactive']='no'
           end
           job['lsf/command']=reggrab(/Command <(.*)>/,accum)
+          job['lsf/Extsched']=reggrab(/Extsched <([^>]*)>/,accum)
+          if not job['lsf/Extsched'].nil? and job['lsf/Extsched'].include? "CRAYLINUX[" then
+            job['lsf/CRAYLINUX']='true'
+          else
+            job['lsf/CRAYLINUX']='false'
+          end
+        when 'reservation_id'
+          job['reservation']=reggrab(/=\s*([A-Za-z0-9._]+)\s*;/,accum)
+          job['lsf/time/reservation']=fromdate(date)
+          #puts "#{job['jobid']} res time #{job['lsf/time/reservation']}"
         when 'Submitted'
           # puts "IN SUBMITTED"
           job['host']=reggrab(/host <([^>]+)>/,accum)
@@ -206,9 +241,25 @@ module EMC
             job['err']=pathify(subcwd,expand_path(job,reggrab(/Error File[^<]*<([^>]+)>/,accum)))
           end
           job['procs']=intgrab(/(\d+) Processors Requested/,accum)
-          job['lsf/span/ptile']=intgrab(/Requested Resources <[^>]*span\[[^\]\>]*ptile=(\d+)\][^>]*>/,accum)
+          s=accum.scan(/(\d+)\*\{select\[craylinux/)
+          if s.empty?
+            job['lsf/span/ptile']=intgrab(/Requested Resources <[^>]*span\[[^\]\>]*ptile=(\d+)\][^>]*>/,accum)
+          else
+            nprocs=0
+            s.each { |match|
+              nprocs += match[0].to_i
+            }
+            job['procs']=nprocs.to_s
+          end
+        when 'Dispatched'
+          if job['procs'].nil?
+            job['procs']=intgrab(/(\d+) Task\(s\)/,accum)
+          end
         when 'Started'
           # puts "IN STARTED"
+          if job['procs'].nil?
+            job['procs']=intgrab(/(\d+) Task\(s\)/,accum)
+          end
           job['lsf/time/Started']=fromdate(date)
           job['lsf/executionCWD']=expand_path(job,reggrab(/CWD[^<]*<([^>]+)>/,accum))
           # puts "execution CWD = ((#{job['lsf/executionCWD']}))"
