@@ -103,7 +103,7 @@ module EMC
           if(line=~/^\s*(\d+(?:\.\d*)?) min of/)
             runlimit=$1.to_f
             #puts("RUNLIMIT = #{runlimit}")
-          elsif(line=~/^\s*Job <(\d+)>/)
+          elsif(line=~/^\s*Job *<(\d+)>/)
             # new job found.  Example:
             # Job <67340>, Job Name <t878_72hr_1>, User <ibmatp>, Project <default>, Status <
             #                           RUN>, Queue <hpc_ibm>, Command <#! /bin/bash;#BSUB -a
@@ -172,15 +172,23 @@ module EMC
           if job['reservation'].nil? || job['reservation']==''
             job['long_state']='ErroneousRunning'
             job['state']='ER'
-          elsif not job['lsf/runlimit'].nil? and \
-                not job['lsf/time/reservation'].nil?
+          end
+          if not job['lsf/runlimit'].nil? and \
+             not job['lsf/time/reservation'].nil?
             age=Time.new.to_i-job['lsf/time/reservation'].to_i
             runlimit=job['lsf/runlimit'].to_i*60
-            if age > runlimit+6*3600
+            if age > runlimit+@opts.running_zombie_age.to_i
+              #puts "Zombie #{job['jobid']} age=#{age} runlimit+6hr=#{runlimit+6*3600}"
               job['long_state']='ZombieRunning'
               job['state']='ZR'
+            else
+              #puts "Job #{job['jobid']} age=#{age} runlimit+6hr=#{runlimit+6*3600}"
             end
+          else
+              #puts "Job #{job['jobid']} runlimit=#{job['lsf/runlimit']} res=#{job['lsf/time/reservation']}"
           end
+        else
+          #puts "Job #{job['jobid']} state=#{job['state']} craylinux=#{job['lsf/CRAYLINUX']} extsched=#{job['lsf/Extsched']}"
         end
         job['workdir']=cwd
         return job
@@ -192,12 +200,12 @@ module EMC
         case head
         when 'Job'
           # puts "IN JOB"
-          jobid=reggrab(/Job <([^>]*)>/,accum)
+          jobid=reggrab(/Job *<([^>]*)>/,accum)
           return nil,nil unless jobid
           job['jobid']=jobid
-          job['name']=reggrab(/Job Name <([^>]+)>/,accum)
-          job['user']=reggrab(/User <([^>]+)>/,accum)
-          status=reggrab(/Status <([^>]+)>/,accum)
+          job['name']=reggrab(/Job Name *<([^>]+)>/,accum)
+          job['user']=reggrab(/User *<([^>]+)>/,accum)
+          status=reggrab(/Status *<([^>]+)>/,accum)
           if(status.nil? || status=='')
             status='??'
           end
@@ -205,17 +213,17 @@ module EMC
           # job['state']=status[0..1]
           job['state']=@opts.namemap[nonil(job['long_state'])]
           # puts "Job #{jobid} long_state #{status} state #{job['state']}"
-          job['project']=reggrab(/Project <([^>]+)>/,accum)
+          job['project']=reggrab(/Project *<([^>]+)>/,accum)
           job['group']=job['project']
-          job['queue']=reggrab(/Queue <([^>]+)>/,accum)
+          job['queue']=reggrab(/Queue *<([^>]+)>/,accum)
           job['class']=job['queue']
           if(accum =~ /, Interactive[a-z A-Z-]*,/)
             job['lsf/interactive']='yes'
           else
             job['lsf/interactive']='no'
           end
-          job['lsf/command']=reggrab(/Command <(.*)>/,accum)
-          job['lsf/Extsched']=reggrab(/Extsched <([^>]*)>/,accum)
+          job['lsf/command']=reggrab(/Command *<(.*)>/,accum)
+          job['lsf/Extsched']=reggrab(/Extsched *<([^>]*)>/,accum)
           if not job['lsf/Extsched'].nil? and job['lsf/Extsched'].include? "CRAYLINUX[" then
             job['lsf/CRAYLINUX']='true'
           else
@@ -227,11 +235,11 @@ module EMC
           #puts "#{job['jobid']} res time #{job['lsf/time/reservation']}"
         when 'Submitted'
           # puts "IN SUBMITTED"
-          job['host']=reggrab(/host <([^>]+)>/,accum)
+          job['host']=reggrab(/host *<([^>]+)>/,accum)
           job['qtime']=fromdate(date)
 #          warn "fromdate(#{date})=#{job['qtime']}"
           job['lsf/time/Submitted']=job['qtime']
-          subcwd=nonil(expand_path(job,reggrab(/CWD <([^>]+)>/,accum)))
+          subcwd=nonil(expand_path(job,reggrab(/CWD *<([^>]+)>/,accum)))
           job['lsf/submittedCWD']=subcwd
           if(job['lsf/interactive']=='yes') then
             job['out']='(interactive)'
@@ -243,7 +251,7 @@ module EMC
           job['procs']=intgrab(/(\d+) Processors Requested/,accum)
           s=accum.scan(/(\d+)\*\{select\[craylinux/)
           if s.empty?
-            job['lsf/span/ptile']=intgrab(/Requested Resources <[^>]*span\[[^\]\>]*ptile=(\d+)\][^>]*>/,accum)
+            job['lsf/span/ptile']=intgrab(/Requested Resources *<[^>]*span\[[^\]\>]*ptile=(\d+)\][^>]*>/,accum)
           else
             nprocs=0
             s.each { |match|
@@ -263,7 +271,7 @@ module EMC
           job['lsf/time/Started']=fromdate(date)
           job['lsf/executionCWD']=expand_path(job,reggrab(/CWD[^<]*<([^>]+)>/,accum))
           # puts "execution CWD = ((#{job['lsf/executionCWD']}))"
-          job['home']=reggrab(/Execution Home <[^>]+>/,accum)
+          job['home']=reggrab(/Execution Home *<[^>]+>/,accum)
         when 'Resource'
           # puts "IN RESOURCE"
           job['lsf/time/ResourceUsageCollected']=fromdate(date)

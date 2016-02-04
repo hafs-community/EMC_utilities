@@ -26,7 +26,7 @@ module EMC
       attr_reader :nofoot,:colormaps,:sort_order,:sorting,:printers
       attr_reader :showq_path,:checkjob_path,:llq_path,:verbose,:no_complete
       attr_reader :queue_manager,:pbsquery_path
-      attr_reader :string_evaluator
+      attr_reader :string_evaluator, :running_zombie_age
 
       def initialize()
         set_constants()
@@ -241,6 +241,7 @@ module EMC
     
         # Default settings:
         @hhs_ens=nil
+        @running_zombie_age=600
         @greps=Array.new
         @antigreps=Array.new
         @cache=nil
@@ -419,11 +420,13 @@ EOS
                               ["--no-auto-update", noarg],
                               ["--help",'-h',noarg],
                               ["--checkjob-path",req],
-                              ["--queue-manager",req]
+                              ["--queue-manager",req],
+                              ["--running-zombie-age",req]
                               )
 
         opts.each do |opt,arg|
           case opt
+          when '--running-zombie-age' ; @running_zombie_age=arg;
           when '--hhs-ens'          ; @hhs_ens=arg;
           when '--verbose'          ; @verbose=true
           when '--remove-done'      ; @no_complete=true
