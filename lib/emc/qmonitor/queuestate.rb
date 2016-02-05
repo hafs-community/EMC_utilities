@@ -185,6 +185,11 @@ module EMC
           #puts 'nil from cache_file()'
           return result
         end
+
+        if not File.exist?(cache_full_file) and not @opts.cache_file.nil? \
+          and File.exist?(@opts.cache_file)
+          cache_full_file=@opts.cache_file
+        end
         
         if(File.exist?(cache_full_file)) then
           oldtime=File.mtime(cache_full_file)
@@ -216,14 +221,14 @@ module EMC
               rescue
               end
               if(@opts.only_cache)
-                raise "Cache file \"#{@opts.cache_full_file}\" could not be parsed, and you disabled running of qstat (-N or --force-caching) so I cannot determine the queue contents."
+                raise "Cache file \"#{cache_full_file}\" could not be parsed, and you disabled running of qstat (-N or --force-caching) so I cannot determine the queue contents."
               end
             end
           else
             #puts "  ... #{age} is not within #{@opts.max_age} and only_cache is false"
           end
         elsif(@opts.only_cache)
-          raise "Cache file \"#{@opts.cache_full_file}\" does not exist, and you disabled running of qstat (-N or --force-caching) so I cannot determine the queue contents."
+          raise "Cache file \"#{cache_full_file}\" does not exist, and you disabled running of qstat (-N or --force-caching) so I cannot determine the queue contents."
         end
         return result
       end

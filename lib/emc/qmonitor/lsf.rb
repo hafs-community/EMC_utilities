@@ -11,18 +11,312 @@ module EMC
     ## CLASS LSFQueueState #################################################
     ########################################################################
 
+    def intjobval(job,str)
+      val=job[str]
+      return nil if val.nil?
+      return nil if val==''
+      return nil unless /^\d+$/.match(val)
+      return val.to_i
+    end
+
+    def timejobval(job,str)
+      val=intjobval(job,str)
+      return nil if val.nil?
+      return nil if val<100000
+      return val
+    end
+    
+    def strjobval(job,str)
+      val=job[str]
+      return nil if val.nil?
+      return nil if val==''
+      return nil if /^\s*$/.match(val)
+      return val
+    end
+    
     class LSFQueueState < QueueState
       include EMC::NoNil
       def initialize(options,user)
         super
       end
 
+      def for_time(time)
+        time=time.to_i
+        ft=LSFQueueState.new(@opts,@user)
+        @jobs.each do |jobid,job|
+          submit_time=timejobval(job,'lsf/time/Submitted')
+          dispatch_time=timejobval(job,'lsf/time/Dispatched')
+          start_time=timejobval(job,'lsf/time/Started')
+
+          next if not submit_time.nil? and submit_time>time
+          next if not dispatch_time.nil? and dispatch_time>time
+          next if not start_time.nil? and start_time>time
+
+          state=nil
+          native_state=nil
+          found_events=false
+          #puts "#{jobid}: #{job['lsf/events'].length} events"
+          job['lsf/events'].each do |etime,head,accum|
+            if etime.nil?
+              puts "ERROR: #{jobid}: NIL ETIME FOR HEAD #{head} ACCUM #{accum}"
+              next
+            end
+            if etime==''
+              puts "ERROR: #{jobid}: ETIME IS EMPTY FOR HEAD #{head} ACCUM #{accum}"
+              next
+            end
+            if etime<100000
+              puts "ERROR: #{jobid}: BAD ETIME #{etime} FOR HEAD #{head} ACCUM #{accum}"
+              next
+            end
+            if etime>time
+              #puts "#{jobid}: stopping at event #{head} #{accum}"
+              break
+            end
+            found_events=true
+            case head
+            when 'Submitted','Job','Dispatched','Pending'
+              state='Q'
+              native_state='QUEUED'
+            when 'Starting','Started'
+              state='ER'
+              native_state='ErroneousRunning'
+            when 'reservation_id'
+              state='R'
+              native_state='Running'
+            when 'Exited','Completed','Done'
+              state='C'
+              native_state='Completed'
+            when 'Suspended'
+              state='H'
+              native_state='Held'
+            when 'Signal'
+            else
+              puts "ERROR: #{jobid}: UNRECOGNIZED HEAD #{head}"
+            end
+          end # each event
+          if state=='R'
+            # Is it actually ZR?
+            res_time=timejobval(job,'lsf/time/reservation')
+            age=time-res_time
+            runlimit=strjobval(job,'lsf/runlimit').to_f
+            zombie_limit=runlimit*60.0+@opts.running_zombie_age.to_i
+            if age>zombie_limit
+              state='ZR'
+              native_state='ZombieRunning'
+            end
+          elsif state=='C'
+            done_time=timejobval(job,'lsf/time/Done')
+            if not done_time.nil?
+              native_state='Done'
+            end
+            exit_code=intjobval(job,'lsf/exit_code')
+            if not exit_code.nil? and exit_code!=0
+              native_state='NonZeroExit'
+              state='RM'
+            end
+            term_reason=strjobval(job,'lsf/term_reason')
+            if not term_reason.nil?
+              native_state=term_reason
+              state='RM'
+            end
+          end # if R or C state
+          if not found_events
+            # job does not start until after this time.
+          elsif not state.nil?
+            newjob=job.clone
+            newjob['lsf/events']=job['lsf/events'].clone
+            newjob['state']=state
+            newjob['native_state']=native_state
+            ft.jobs[jobid]=newjob
+            #puts "#{jobid}: state=#{state} native=#{native_state}"
+          else
+            puts "#{jobid}: no state: #{job}"
+          end # if need to store job
+        end # each job
+        return ft
+      end # for_time
+      
+      def old_for_time(time)
+        ft=LSFQueueState.new(@opts,@user)
+        now_time=time.to_i
+        @jobs.each do |jobid,job|
+          submit_time=timejobval(job,'lsf/time/Submitted')
+          dispatch_time=timejobval(job,'lsf/time/Dispatched')
+          start_time=timejobval(job,'lsf/time/Started')
+          res_time=timejobval(job,'lsf/time/reservation')
+          runlimit=strjobval(job,'lsf/runlimit').to_f
+          collect_time=timejobval(job,'lsf/time/ResourceUsageCollected')
+          signal_time=timejobval(job,'lsf/time/Signal')
+          pending_time=timejobval(job,'lsf/time/Pending')
+          suspend_time=timejobval(job,'lsf/time/Suspended')
+          complete_time=timejobval(job,'lsf/time/Completed')
+          exit_time=timejobval(job,'lsf/time/Exited')
+          done_time=timejobval(job,'lsf/time/Done')
+          exit_code=intjobval(job,'lsf/exit_code')
+
+          #puts "EXAMINE #{jobid} #{job["user"]} #{job["name"]} submit=#{submit_time} dispatch=#{dispatch_time} start=#{start_time} res=#{res_time} runlimit=#{runlimit} collect=#{collect_time} signal=#{signal_time} pending=#{pending_time} suspend=#{suspend_time} complete=#{complete_time} exit=#{exit_time} done=#{done_time} exit code=#{exit_code}"
+
+          finished = nil
+          if not complete_time.nil? and finished.nil? or \
+               complete_time.to_i>finished.to_i
+            finished=complete_time
+          end
+          if not exit_time.nil? and finished.nil? or \
+               exit_time.to_i>finished.to_i
+            finished=exit_time
+          end
+          if not done_time.nil? and finished.nil? or \
+               done_time.to_i>finished.to_i
+            finished=done_time
+          end
+          
+          job2=job.clone
+          if submit_time.nil?
+            #puts "#{jobid}: no submit time"
+            next
+          end
+
+          if dispatch_time.nil?
+            #puts "#{jobid}: no dispatch_time"
+            next
+          end
+
+          if now_time<submit_time.to_i and now_time<dispatch_time.to_i
+            #puts "#{jobid}: now (#{now_time}) is too early: submit=#{submit_time.to_i} dispatch=#{dispatch_time.to_i}"
+            next
+          end
+
+          # We get here if the job was running or queued at or after
+          # the current time.
+          if start_time.nil? or now_time<start_time.to_i
+            # Job submitted but has not reached "started" status yet:
+            #puts "#{jobid}: QUEUED: START in #{start_time.to_i-now_time}"
+            job2['state']='Q'
+            job2['native_state']='Queued'
+            ft.jobs[jobid]=job2
+            next
+          else
+            #puts "#{jobid}: STARTED at #{now_time-start_time.to_i}"
+          end
+
+          # At this point, the job started at or before the now_time.
+
+          if res_time.nil?
+            # Job never received a reservation.
+            #puts "#{jobid}: NO RESERVATION GRANTED"
+          elsif now_time<res_time
+            # Job is in a fake "running" state but has no reservation:
+            #puts "#{jobid}: ER: RESERVATION in #{res_time-now_time}"
+            job2['state']='ER'
+            job2['native_state']='ErroneousRunning'
+            ft.jobs[jobid]=job2
+            next
+          else
+            #puts "#{jobid}: RUNNING: RESERVATION at #{now_time-res_time}"
+          end
+
+          if not finished.nil? and finished.to_i<=now_time
+            # Job finished at or before the current time.
+            #puts "#{jobid}: FINISHED #{now_time-finished} ago"
+            term_reason=strjobval(job,'lsf/term_reason')
+            if not term_reason.nil?
+              job2['state']='RM'
+              job2['native_state']=job['lsf/term_reason']
+              ft.jobs[jobid]=job2
+              #puts "#{jobid}: #{job2['state']} #{job2['native_state']}"
+              next
+            end
+            if not exit_code.nil?
+              if exit_code==0
+                job2['state']='C'
+                job2['native_state']='Completed'
+              else
+                job2['state']='RM'
+                job2['native_state']='NonZeroExit'
+              end
+              job2['exit_status']=exit_code.to_s
+              ft.jobs[jobid]=job2
+              #puts "#{jobid}: #{job2['state']} #{job2['native_state']}"
+              next
+            end
+            if not exit_time.nil?
+              job2['state']='RM'
+              job2['native_state']='NonZeroExit'
+              ft.jobs[jobid]=job2
+              #puts "#{jobid}: #{job2['state']} #{job2['native_state']}"
+              next
+            end
+            if not complete_time.nil?
+              job2['state']='C'
+              job2['native_state']='CompletedReasonUnknown'
+              ft.jobs[jobid]=job2
+              #puts "#{jobid}: #{job2['state']} #{job2['native_state']}"
+              next
+            end
+            if not done_time.nil?
+              job2['state']='C'
+              job2['native_state']='Done'
+              ft.jobs[jobid]=job2
+              #puts "#{jobid}: #{job2['state']} #{job2['native_state']}"
+              next
+            end
+            # Should never reach here.
+          elsif not res_time.nil? and not runlimit.nil? and finished.nil? or 
+            # Job received a reservation.
+            zombie_limit=runlimit*60.0+@opts.running_zombie_age.to_i
+            if finished.nil?
+              age=now_time-res_time.to_i
+              #puts "#{jobid}: age #{age} relative to now, runlimit #{runlimit*60.0} zombie age #{@opts.running_zombie_age} zombie limit #{zombie_limit}"
+            else
+              age=finished-res_time.to_i
+              #puts "#{jobid}: age #{age} relative to finish (#{now_time-finished} ago), runlimit #{runlimit*60.0} zombie age #{@opts.running_zombie_age} zombie limit #{zombie_limit}"
+            end
+            if age > zombie_limit
+              job2['state']='ZR'
+              job2['native_state']='ZombieRunning'
+            elsif now_time>=res_time.to_i
+              job2['state']='R'
+              job2['native_state']='Running'
+            else
+              job2['state']='ER'
+              job2['native_state']='ErroneousRunning'
+            end
+            #puts "#{jobid}: #{job2['native_state']}"
+            ft.jobs[jobid]=job2
+            next
+          end # if finished
+
+          if res_time.nil?
+            # Never finished, did not receive a reservation, but is
+            # listed as having started.
+            job2['state']='ER'
+            job2['native_state']='ErroneousRunning'
+            ft.jobs[jobid]=job2
+            next
+          end
+          
+          # Should never reach here.
+          #puts "#{jobid}: internal error"
+          job2['state']='??'
+          job2['native_state']='Confused'
+          ft.jobs[jobid]=job2
+
+        end # job loop
+
+        return ft
+      end # for_time
+      
       def call_queue_manager()
         result=nil
         user=@user
         
         if(!@opts.only_cache) then
+          if ! @opts.bhist_options.nil?
+            job_list_command="#{@opts.bhist_path} #{@opts.bhist_options} -l -a "
+          else
             job_list_command="#{@opts.bjobs_path} -l "
+          end
             if(@opts.manual_options!=nil)
               job_list_command+=" #{@opts.manual_options}"
             elsif(user==nil) then
@@ -76,6 +370,7 @@ module EMC
         job=nil    # hash with current job's info
         date=nil   # datestamp of this piece of metadata (nil for job header)
         runlimit=nil
+        events=Array.new
         # puts "START OF PARSING"
 #        hat['CRAYLINUX']='false'
         text.each_line { |line|
@@ -94,7 +389,7 @@ module EMC
               # We've reached the end of the multiline block, so
               # process the accumulated text, and then reprocess the
               # current line in parser mode "top".
-              jobid,job = block2info(accum,head,date,jobid,job)
+              jobid,job = block2info(accum,head,date,jobid,job,events)
               mode='top'
               date=nil
             end
@@ -116,10 +411,12 @@ module EMC
             if(!jobid.nil?) # store the old job if this isn't the first
               # puts "STORE #{jobid}"
               job['lsf/runlimit']=runlimit.to_s if(!runlimit.nil?)
+              job['lsf/events']=events
               hat[jobid]=finishParsingJob(jobid,job)
               jobid=nil
               job=nil
               date=nil
+              events=Array.new
             end
           else
             # Not a new job, but a new multiline block of metadata
@@ -135,7 +432,11 @@ module EMC
             if(matches)
               date=matches[1]
               type=matches[2]
-              if(type=='Submitted' || type=='Started' || type=='Resource' || type=='reservation_id' || type=='Dispatched')
+              if(type=='Submitted' || type=='Started' || type=='Resource' \
+                 || type=='reservation_id' || type=='Dispatched' \
+                 || type=='Exited with' || type=='Completed' \
+                 || type=='Suspended' || type=='Pending' || type=='Signal' \
+                 || type=='Resource' || type=='Done' || type=='Starting')
                 mode='multiline'
                 head=type
                 accum=matches[2].to_s+matches[3]
@@ -153,8 +454,9 @@ module EMC
               runlimit=nil
             #puts("RUNLIMIT RESET FOR JOB #{jobid}")
           end
-          jobid,job = block2info(accum,head,date,jobid,job)
+          jobid,job = block2info(accum,head,date,jobid,job,events)
         end
+        job['lsf/events']=events
         if(!jobid.nil? && !job.nil?)
           #puts "STORE #{jobid} AT END"
           job['lsf/runlimit']=runlimit.to_s if(!runlimit.nil?)
@@ -194,9 +496,17 @@ module EMC
         return job
       end
 
-      def block2info(accum,head,date,jobid,job)
+      def block2info(accum,head,date,jobid,job,events)
         # puts "BLOCK2INFO: accum=(#{accum}) head=#{head} date=#{date} jobid=#{jobid}"
         job={} unless job
+        events=List.new unless events
+        date=fromdate(date)
+        if not date.nil? and not head.nil? and date.to_i>100000 and head!=''
+          #puts "STORE BLOCK: accum=(#{accum}) head=#{head} date=#{date} jobid=#{jobid}"
+          events << [ date.to_i,head,accum ]
+        else
+          #puts "BAD BLOCK: accum=(#{accum}) head=#{head} nil?=#{head.nil?} date=#{date}=#{date.to_i} nil?=#{date.nil?} jobid=#{jobid}"
+        end
         case head
         when 'Job'
           # puts "IN JOB"
@@ -231,14 +541,16 @@ module EMC
           end
         when 'reservation_id'
           job['reservation']=reggrab(/=\s*([A-Za-z0-9._]+)\s*;/,accum)
-          job['lsf/time/reservation']=fromdate(date)
+          job['lsf/time/reservation']=date
           #puts "#{job['jobid']} res time #{job['lsf/time/reservation']}"
         when 'Submitted'
+          if job['lsf/time/Submitted'].nil?
+            #warn "fromdate(#{date})=#{job['qtime']}"
+            job['lsf/time/Submitted']=job['qtime']
+          end
           # puts "IN SUBMITTED"
           job['host']=reggrab(/host *<([^>]+)>/,accum)
-          job['qtime']=fromdate(date)
-#          warn "fromdate(#{date})=#{job['qtime']}"
-          job['lsf/time/Submitted']=job['qtime']
+          job['qtime']=date
           subcwd=nonil(expand_path(job,reggrab(/CWD *<([^>]+)>/,accum)))
           job['lsf/submittedCWD']=subcwd
           if(job['lsf/interactive']=='yes') then
@@ -260,21 +572,50 @@ module EMC
             job['procs']=nprocs.to_s
           end
         when 'Dispatched'
+          if job['lsf/time/Dispatched'].nil?
+            job['lsf/time/Dispatched']=date
+          end
           if job['procs'].nil?
             job['procs']=intgrab(/(\d+) Task\(s\)/,accum)
+          end
+          job['lsf/executionCWD']=expand_path(job,reggrab(/CWD[^<]*<([^>]+)>/,accum))
+        when 'Starting'
+          if job['lsf/time/Started'].nil?
+            job['lsf/time/Started']=date
           end
         when 'Started'
           # puts "IN STARTED"
           if job['procs'].nil?
             job['procs']=intgrab(/(\d+) Task\(s\)/,accum)
           end
-          job['lsf/time/Started']=fromdate(date)
+          job['lsf/time/Started']=date
           job['lsf/executionCWD']=expand_path(job,reggrab(/CWD[^<]*<([^>]+)>/,accum))
           # puts "execution CWD = ((#{job['lsf/executionCWD']}))"
           job['home']=reggrab(/Execution Home *<[^>]+>/,accum)
+        when 'Exited'
+          job['lsf/time/Exited']=date
+          job['lsf/exit_code']=reggrab(/Exited with exit code (\d+)/,accum)
+        when 'Completed'
+          job['lsf/time/Completed']=date
+          if /Completed <exit>; (TERM_[A-Z]+)/.match(accum)
+            job['lsf/term_reason']=$1
+          elsif /Completed <exit>;\s*$/.match(accum)
+            job['lsf/exit_code']='0'
+          end
+        when 'Done'
+          job['lsf/time/Done']=date
+        when 'Suspended'
+          job['lsf/time/Suspended']=date
+          job['lsf/suspended']=reggrab(/(Suspended.*) *$/,accum)
+        when 'Pending'
+          job['lsf/time/Pending']=date
+          job['lsf/pending']=reggrab(/Pending:? *(.*) *$/,accum)
+        when 'Signal'
+          job['lsf/time/Signal']=date
+          job['lsf/signal']=reggrab(/Signal *<([^>]+)>/,accum)
         when 'Resource'
           # puts "IN RESOURCE"
-          job['lsf/time/ResourceUsageCollected']=fromdate(date)
+          job['lsf/time/ResourceUsageCollected']=date
           job['lsf/used/cputime'],job['lsf/used/cputime_units'] = 
             unitgrab(/The CPU time used is (\d+) ([A-Za-z]+)/,accum)
           job['lsf/used/mem'],job['lsf/used/mem_units'] = 

@@ -25,7 +25,7 @@ module EMC
       attr_reader :vars,:auto_update,:only_cache,:disable_caching,:nohead
       attr_reader :nofoot,:colormaps,:sort_order,:sorting,:printers
       attr_reader :showq_path,:checkjob_path,:llq_path,:verbose,:no_complete
-      attr_reader :queue_manager,:pbsquery_path
+      attr_reader :queue_manager,:pbsquery_path,:bhist_path,:bhist_options
       attr_reader :string_evaluator, :running_zombie_age
 
       def initialize()
@@ -246,7 +246,9 @@ module EMC
         @antigreps=Array.new
         @cache=nil
         @bjobs_path='bjobs'
+        @bhist_path='bhist'
         @qstat_path='qstat'
+        @bhist_options=nil
         @pbsquery_path='pbsquery'
         @llq_path='llq'
         @showq_path='showq'
@@ -393,6 +395,7 @@ EOS
         opts = GetoptLong.new(["--llq-path", "-Q", req],
                               ["--remove-done", "-d", noarg],
                               ["--bjobs-path", req],
+                              ["--bhist-path", req],
                               ["--qstat-path", req],
                               ["--pbsquery-path", req],
                               ["--hhs-ens", req],
@@ -421,11 +424,13 @@ EOS
                               ["--help",'-h',noarg],
                               ["--checkjob-path",req],
                               ["--queue-manager",req],
-                              ["--running-zombie-age",req]
-                              )
+                              ["--running-zombie-age",req],
+                              ['--bhist-options',req]
+                             )
 
         opts.each do |opt,arg|
           case opt
+          when '--bhist-options'    ; @bhist_options=arg;
           when '--running-zombie-age' ; @running_zombie_age=arg;
           when '--hhs-ens'          ; @hhs_ens=arg;
           when '--verbose'          ; @verbose=true
@@ -435,6 +440,7 @@ EOS
           when '--qstat-path'       ; @qstat_path=arg
           when '--pbsquery-path'    ; @pbsquery_path=arg
           when '--bjobs-path'       ; @bjobs_path=arg
+          when '--bhist-path'       ; @bhist_path=arg
           when '--llq-path'         ; @llq_path=arg
           when '--showq-path'       ; @showq_path=arg
           when '--checkjob-path'    ; @checkjob_path=arg
@@ -544,6 +550,8 @@ EOS
           @printers=@emu_printers['default'] if(@printers==nil)
         end
 
+        return if @emu_mode=='qhist'
+        
         while(argv.length>0)
           #puts "argv[0]=\"#{argv[0]}\" and argv[0][0..0]=\"#{argv[0][0..0]}\"."
           if(argv[0] == '+nohead') then
