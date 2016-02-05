@@ -17,8 +17,8 @@ timestep=ARGV[2].to_i
 
 puts "ARGS: start=#{starttime}  end=#{endtime}  step=#{timestep}"
 
-if timestep<300
-  puts "TImestep must be 300 or more."
+if timestep<1
+  puts "Timestep must be 1 second or greater."
   exit 1
 end
 
