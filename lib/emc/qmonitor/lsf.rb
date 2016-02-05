@@ -456,9 +456,9 @@ module EMC
           end
           jobid,job = block2info(accum,head,date,jobid,job,events)
         end
-        job['lsf/events']=events
         if(!jobid.nil? && !job.nil?)
           #puts "STORE #{jobid} AT END"
+          job['lsf/events']=events
           job['lsf/runlimit']=runlimit.to_s if(!runlimit.nil?)
           hat[jobid]=finishParsingJob(jobid,job)
         end
