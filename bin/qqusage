@@ -1,0 +1,58 @@
+#! /usr/bin/env ruby
+
+require 'emc/qdisplay'
+require 'time'
+require 'set'
+
+include EMC::Queues
+
+# Parse arguments and environment:
+qo=EQMOptions.new()
+qo.set_emu_mode('qqusage')
+qo.parse_arguments(ARGV)
+
+# Get the queue state
+qs=qo.get_state()
+qs.update()
+
+njobs=Hash.new
+nprocs=Hash.new
+cannot_reuse=0
+n_no_state=0
+n_no_procs=0
+qs.jobs.each do |jobid,job|
+  cannot_reuse=[cannot_reuse,job['lsf/cannot_reuse'].to_i].max
+  
+  state=job['state']
+
+  if not state.nil? and state!=''
+    njobs[state]=njobs[state].to_i+1
+  else
+    n_no_state+=1
+    state='??'
+  end
+
+  procs=job['procs']
+  if procs.nil? or procs==''
+    n_no_procs+=1
+    next
+  else
+    nprocs[state]=nprocs[state].to_i+procs.to_i
+  end
+end
+
+njobs_states=Set.new(njobs.keys)
+nprocs_states=Set.new(nprocs.keys)
+expect_states=Set.new [ 'R', 'ZR', 'ER', 'Q', 'H' ]
+states = njobs_states|nprocs_states|expect_states
+states=states.to_a
+states=states.sort
+
+print "#{Time.new.strftime("%Y-%m-%d %H:%M:%S")} ST=ncores(njobs) "
+states.each do |state|
+  print "#{state}=#{nprocs[state]}(#{njobs[state]}) "
+end
+print "[unknown procs: #{n_no_procs} jobs] " if n_no_procs>0
+print "[unknown state: #{n_no_state} jobs] " if n_no_state>0
+print "[cannot reuse #{cannot_reuse} nodes] " if cannot_reuse>0
+print "\n"
