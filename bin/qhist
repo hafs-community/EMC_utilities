@@ -25,7 +25,6 @@ end
 # Get the queue state
 puts "Get queue state..."
 qs=qo.get_state()
-puts "Parse queue state..."
 qs.update()
 
 puts "Parse queue state information..."
