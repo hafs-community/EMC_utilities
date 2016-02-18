@@ -18,7 +18,7 @@ module EMC
       def call_queue_manager()
         result=nil
         user=@user
-        
+
         if(!@opts.only_cache) then
           reps=@opts.reps
           if(reps==nil || reps<1) then
@@ -168,6 +168,13 @@ module EMC
 
           hat['state']=hat['t/job_state']
           
+          exit_status=hat['t/exit_status']
+          if not exit_status.nil? and exit_status=~/^\s*\d+\s*$/
+            exit_status=exit_status.to_i
+            if exit_status != 0
+              hat['state']="RM"
+            end
+          end
 
           keep=true
           if(block_given?) then
