@@ -58,15 +58,15 @@ module EMC
           #puts "#{jobid}: #{job['lsf/events'].length} events"
           job['lsf/events'].each do |etime,head,accum|
             if etime.nil?
-              puts "ERROR: #{jobid}: NIL ETIME FOR HEAD #{head} ACCUM #{accum}"
+              #puts "ERROR: #{jobid}: NIL ETIME FOR HEAD #{head} ACCUM #{accum}"
               next
             end
             if etime==''
-              puts "ERROR: #{jobid}: ETIME IS EMPTY FOR HEAD #{head} ACCUM #{accum}"
+              #puts "ERROR: #{jobid}: ETIME IS EMPTY FOR HEAD #{head} ACCUM #{accum}"
               next
             end
             if etime<100000
-              puts "ERROR: #{jobid}: BAD ETIME #{etime} FOR HEAD #{head} ACCUM #{accum}"
+              #puts "ERROR: #{jobid}: BAD ETIME #{etime} FOR HEAD #{head} ACCUM #{accum}"
               next
             end
             if etime>time
@@ -92,7 +92,7 @@ module EMC
               native_state='Held'
             when 'Signal'
             else
-              puts "ERROR: #{jobid}: UNRECOGNIZED HEAD #{head}"
+              #puts "ERROR: #{jobid}: UNRECOGNIZED HEAD #{head}"
             end
           end # each event
           if state=='R'
@@ -131,7 +131,7 @@ module EMC
             ft.jobs[jobid]=newjob
             #puts "#{jobid}: state=#{state} native=#{native_state}"
           else
-            puts "#{jobid}: no state: #{job}"
+            #puts "#{jobid}: no state: #{job}"
           end # if need to store job
         end # each job
         return ft
@@ -155,7 +155,6 @@ module EMC
               job_list_command+=" -u #{user}"
             end
             
-            warn "#{job_list_command}" if @opts.verbose
             agetype='AT'
             jobs=Hash.new()
             reps=@opts.reps
@@ -165,18 +164,22 @@ module EMC
             @queue_from=job_list_command
             for irep in 1..reps
               result=''
-              job_types=['-s','-p','-x',' ']
+              job_types=['','-s','-p','-x']
               if(!@opts.no_complete) then
                 job_types.push('-d')
               end
               for job_type in job_types
                 tz=ENV['TZ']
                 ENV['TZ']="UTC"
+                warn "#{job_list_command} #{job_type}" if @opts.verbose
                 stdin,stdout,stderr = Open3.popen3("#{job_list_command} #{job_type}")
+                stdin.close()
                 ENV['TZ']=tz
-                result+=stdout.read()
+                stdoutr=stdout.read()
+                stderrr=stderr.read()
+                result+=stdoutr
               end
-              # puts "LIST RESULT: \n#{result}\n(end of list result dump)";
+              #puts "LIST RESULT: \n#{result}\n(end of list result dump)";
               text2jobs(result,jobs,'lsf')
               if(irep<@opts.reps && @opts.rep_sleep>0) then
                 sleep(@opts.rep_sleep)
@@ -199,21 +202,23 @@ module EMC
         jobid=nil  # current job id
         job=nil    # hash with current job's info
         cannot_reuse=nil # number of nodes that cannot be reused
+        load_info=nil # load information unavailable
         date=nil   # datestamp of this piece of metadata (nil for job header)
         runlimit=nil
         events=Array.new
-        # puts "START OF PARSING"
+        #puts "START OF PARSING"
 #        hat['CRAYLINUX']='false'
         text.each_line { |line|
+          #puts "LINE = #{line}"
           if(line=~/^ *PGID: \d+\s*;\s+PIDs:/)
-            # puts "SKIP PGID/PID LINE: #{line}"
+             #puts "SKIP PGID/PID LINE: #{line}"
             next
           end
           if(mode=='multiline')
             matches=/^ {20,26}(.+)/.match(line)
             if(matches)
               # This is yet another line in a multiline block, so accumulate it.
-              # puts "APPEND: #{matches[1]}"
+              #puts "APPEND: #{matches[1]}"
               accum+=matches[1]
               next
             else
@@ -229,6 +234,9 @@ module EMC
           if(line=~/Recently released .* cannot be re-used at this moment: (\d+)/)
             cannot_reuse=$1.to_i
             #puts("RUNLIMIT = #{runlimit}")
+          elsif(line=~/Load information unavailable: (\d+) hosts/)
+            load_info=$1.to_i
+            #puts("RUNLIMIT = #{runlimit}")
           elsif(line=~/^\s*(\d+(?:\.\d*)?) min of/)
             runlimit=$1.to_f
             #puts("RUNLIMIT = #{runlimit}")
@@ -243,9 +251,10 @@ module EMC
             mode='multiline'
             head='Job'
             if(!jobid.nil?) # store the old job if this isn't the first
-              # puts "STORE #{jobid}"
+              #puts "STORE #{jobid}"
               job['lsf/runlimit']=runlimit.to_s if(!runlimit.nil?)
               job['lsf/cannot_reuse']=cannot_reuse.to_s if(!cannot_reuse.nil?)
+              job['lsf/load_info']=load_info.to_s if(!load_info.nil?)
               job['lsf/events']=events
               hat[jobid]=finishParsingJob(jobid,job)
               jobid=nil
@@ -280,7 +289,7 @@ module EMC
                 #puts "IGNORING (bad type '#{type}'): #{line}"
               end
             else
-              # puts "IGNORING (not date/type header): #{line}"
+              #puts "IGNORING (not date/type header): #{line}"
             end
           end
         }
@@ -288,6 +297,7 @@ module EMC
           if head=='Job'
             runlimit=nil
             cannot_reuse=nil
+            load_info=nil
             #puts("RUNLIMIT RESET FOR JOB #{jobid}")
           end
           jobid,job = block2info(accum,head,date,jobid,job,events)
@@ -296,6 +306,7 @@ module EMC
           #puts "STORE #{jobid} AT END"
           job['lsf/events']=events
           job['lsf/cannot_reuse']=cannot_reuse.to_s if(!cannot_reuse.nil?)
+          job['lsf/load_info']=load_info.to_s if(!load_info.nil?)
           job['lsf/runlimit']=runlimit.to_s if(!runlimit.nil?)
           hat[jobid]=finishParsingJob(jobid,job)
         end
@@ -398,6 +409,13 @@ module EMC
             job['err']=pathify(subcwd,expand_path(job,reggrab(/Error File[^<]*<([^>]+)>/,accum)))
           end
           job['procs']=intgrab(/(\d+) Processors Requested/,accum)
+          s=accum.scan(/Requested Resources <[^>]*>/)
+          if not s.empty?
+            s0=s[0].gsub(/\s+/,'')
+            if s0.scan(/rusage\[mem=(\d+)\]/)
+              job['lsf/firstmem']=$1
+            end
+          end
           s=accum.scan(/(\d+)\*\{select\[craylinux/)
           if s.empty?
             job['lsf/span/ptile']=intgrab(/Requested Resources *<[^>]*span\[[^\]\>]*ptile=(\d+)\][^>]*>/,accum)
