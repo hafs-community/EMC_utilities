@@ -18,10 +18,12 @@ qs.update()
 njobs=Hash.new
 nprocs=Hash.new
 cannot_reuse=0
+load_info=0
 n_no_state=0
 n_no_procs=0
 qs.jobs.each do |jobid,job|
   cannot_reuse=[cannot_reuse,job['lsf/cannot_reuse'].to_i].max
+  load_info=[load_info,job['lsf/load_info'].to_i].max
   
   state=job['state']
 
@@ -55,4 +57,5 @@ end
 print "[unknown procs: #{n_no_procs} jobs] " if n_no_procs>0
 print "[unknown state: #{n_no_state} jobs] " if n_no_state>0
 print "[cannot reuse #{cannot_reuse} nodes] " if cannot_reuse>0
+print "[no load info #{load_info} nodes] " if load_info>0
 print "\n"

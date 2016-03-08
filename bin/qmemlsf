@@ -1,0 +1,31 @@
+#! /usr/bin/env ruby
+
+require 'emc/qdisplay'
+
+include EMC::Queues
+
+# Parse arguments and environment:
+qo=EQMOptions.new()
+qo.parse_arguments(ARGV)
+
+# Decide how to print the output:
+printers=Hash.new()
+printers['foot1']='From <Q_SOURCE> (age <Q_AGE> sec.)'
+if(qo.user==nil) then
+  printers['default']='<8:jobid> <*8:reservation> <*-7:queue> <*12:user> <5:procs> <6:lsf/firstmem> <-2:state> <*11:qtime.time()> <out.shortpath>'
+  printers['head1']=' Job ID   Reserv.  Queue    Username   Procs Memory ST Queue Time  Stdout Location'
+  printers['head2']='-------- -------- ------- ------------ ----- ------ -- ----------- ------------------------------------'
+else
+  printers['default']='<8:jobid> <*8:reservation> <*-7:queue> <5:procs> <6:lsf/firstmem> <-2:state> <*11:qtime.time()> <out.shortpath>'
+  printers['head1']=' Job ID   Reserv.  Queue  Procs Memory ST Queue Time  Stdout Location'
+  printers['head2']='-------- -------- ------- ----- ------ -- ----------- ------------------------------------'
+end
+qo.printers=printers
+
+# Get the queue state
+qs=qo.get_state()
+qr=QueueReporter.new(qs,qo)
+qs.update()
+
+# Tell the EQM QueueReporter to take over:
+qr.run()
