@@ -331,7 +331,7 @@ module EMC
             end
           elsif(File.exist?('/scratch1') && File.exist?('/scratch2')) then
             qs=EMC::Queues::TorqueQueueState.new(self,user)
-          elsif(File.exist?('/lustre/fs') && File.exist?('/lustre/ltfs')) then
+          elsif(File.exist?('/lustre/f1')) then
             qs=EMC::Queues::MoabQueueState.new(self,user)
           elsif(File.exist?('/selinux')) then
             qs=EMC::Queues::LSFQueueState.new(self,user)

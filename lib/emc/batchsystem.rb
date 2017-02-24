@@ -195,7 +195,7 @@ class BatchSys
       cluster,qmanager = 'ttfrisaola','Torque'
     elsif(File.exist?('/scratch1') || File.exist?('/scratch2'))
       cluster,qmanager = 'zeus','Torque'
-    elsif(File.exist?('/lustre/fs') || File.exist?('/lustre/ltfs'))
+    elsif(File.exist?('/lustre/f1')
       cluster,qmanager = 'gaea','Moab'
     elsif(File.exist?('/com'))
       # On an NCEP machine
