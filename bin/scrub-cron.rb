@@ -1,5 +1,23 @@
 #! /usr/bin/env ruby
 
+# Scrubs old cron jobs.  Reads the user's crontab and prints a scrubbed version to stdout.  
+#
+# Looks for blocks like this:
+#     #:# until 2018091418
+#     10 10 * * * /bin/true
+#     #:# end until
+#
+#     #:# until 2003091419
+#     10 10 * * * /bin/echo > /dev/null
+#     #:# end
+#
+# Removes a block of cron jobs once its "until" date has been reached.
+# Any cron jobs not in an "until" block are passed through unmodified.
+#
+# On error, prints the original crontab to stdout (if possible) and
+# exits with non-zero status.  Note that the stdout could be empty if
+# "crontab -l" failed or if the original crontab was empty.
+
 require "date"
 
 oldtab=`crontab -l`
@@ -52,6 +70,7 @@ end
 
 if error
   puts oldtab
+  exit(1)
 else
   puts newtab.join("")
 end
