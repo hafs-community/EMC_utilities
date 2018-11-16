@@ -4,6 +4,7 @@ require 'emc/eqmoptions.rb'
 
 require 'emc/qmonitor/moab.rb'
 require 'emc/qmonitor/lsf.rb'
+require 'emc/qmonitor/slurm.rb'
 require 'emc/qmonitor/torque.rb'
 require 'emc/qmonitor/gridengine.rb'
 require 'emc/qmonitor/loadleveler.rb'
@@ -48,6 +49,14 @@ module EMC
     # This class is a wrapper around one job in a QueueState object and
     # allows more sophisticated parsing and manipulation of the per-job
     # state
+
+    def in_path(exe)
+      ENV['PATH'].each_line(':') do |dir|
+        there=dir.gsub(/:$/,'')+'/'+exe
+        return there if File.executable? there
+      end
+      return nil
+    end
 
     class JobState
       include EMC::NoNil
@@ -308,6 +317,8 @@ module EMC
             qs=EMC::Queues::GridEngineQueueState.new(self,user)
           when 'moab'
             qs=EMC::Queues::MoabQueueState.new(self,user)
+          when 'slurm'
+            qs=EMC::Queues::SlurmQueueState.new(self,user)
           when 'lsf'
             qs=EMC::Queues::LSFQueueState.new(self,user)
           when 'loadleveler'
@@ -322,22 +333,30 @@ module EMC
         if(qs.nil?)
           # Guess which cluster you are on and make the correct
           # monitor object for it.
-          if(File.exist?('/lfs1') || File.exist?('/pan2')) then
-            # We're on Jet.  Are we on sJet or non-s Jet?
-            if(is_torque())
-              qs=EMC::Queues::TorqueQueueState.new(self,user)
-            else
-              qs=EMC::Queues::GridEngineQueueState.new(self,user)
-            end
+          if not in_path('scontrol').nil?
+            # Check for SLURM first because most of NOAA is moving to
+            # SLURM.  There may be leftover "qstat" commands in $PATH,
+            # so we need to make sure SLURM is discovered first.
+            qs=EMC::Queues::SlurmQueueState.new(self,user)
+          elsif not in_path('bhist').nil?
+            # LSF is available, so use that.
+            qs=EMC::Queues::LSFQueueState.new(self,user)
+
+          # Per-machine defaults for NOAA clusters:
+          elsif(File.exist?('/lfs1') || File.exist?('/pan2')) then # jet
+            qs=EMC::Queues::TorqueQueueState.new(self,user)
           elsif(File.exist?('/scratch1') && File.exist?('/scratch2')) then
+            # Theia or Selene
             qs=EMC::Queues::TorqueQueueState.new(self,user)
           elsif(File.exist?('/lustre/f1')) then
+            # GAEA
             qs=EMC::Queues::MoabQueueState.new(self,user)
           elsif(File.exist?('/selinux')) then
+            # Probably WCOSS
             qs=EMC::Queues::LSFQueueState.new(self,user)
           else
-            # Assume CCS
-            qs=EMC::Queues::LoadLevelerQueueState.new(self,user)
+            # Assume Torque
+            qs=EMC::Queues::TorqueQueueState.new(self,user)
           end
         end
 

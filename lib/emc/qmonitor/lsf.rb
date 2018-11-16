@@ -345,7 +345,7 @@ module EMC
       end
 
       def block2info(accum,head,date,jobid,job,events)
-        # puts "BLOCK2INFO: accum=(#{accum}) head=#{head} date=#{date} jobid=#{jobid}"
+        #puts "BLOCK2INFO: accum=(#{accum}) head=#{head} date=#{date} jobid=#{jobid}"
         job={} unless job
         events=List.new unless events
         date=fromdate(date)
@@ -357,7 +357,7 @@ module EMC
         end
         case head
         when 'Job'
-          # puts "IN JOB"
+          #puts "IN JOB"
           jobid=reggrab(/Job *<([^>]*)>/,accum)
           return nil,nil unless jobid
           job['jobid']=jobid
@@ -370,7 +370,7 @@ module EMC
           job['long_state']=status
           # job['state']=status[0..1]
           job['state']=@opts.namemap[nonil(job['long_state'])]
-          # puts "Job #{jobid} long_state #{status} state #{job['state']}"
+          #puts "Job #{jobid} long_state #{status} state #{job['state']}"
           job['project']=reggrab(/Project *<([^>]+)>/,accum)
           job['group']=job['project']
           job['queue']=reggrab(/Queue *<([^>]+)>/,accum)
@@ -405,8 +405,8 @@ module EMC
             job['out']='(interactive)'
             job['err']='(interactive)'
           else
-            job['out']=pathify(subcwd,expand_path(job,reggrab(/Output File[^<]*<([^>]+)>/,accum)))
-            job['err']=pathify(subcwd,expand_path(job,reggrab(/Error File[^<]*<([^>]+)>/,accum)))
+            job['out']=pathify(subcwd,expand_path(job,reggrab(/Output *File *[^<]*<([^>]+)>/,accum)))
+            job['err']=pathify(subcwd,expand_path(job,reggrab(/Error *File *[^<]*<([^>]+)>/,accum)))
           end
           job['procs']=intgrab(/(\d+) Processors Requested/,accum)
           s=accum.scan(/Requested Resources <[^>]*>/)
