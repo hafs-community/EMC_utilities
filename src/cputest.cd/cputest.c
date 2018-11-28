@@ -7,15 +7,26 @@
 
 // Decide whether OpenMP and MPI are enabled.
 
+// USE_MPI variable is mandatory.  Abort if it is unset.
 #ifndef USE_MPI
-#  warning USE_MPI is unset
-#  define USE_MPI 0
+#  error Preprocessor macro "USE_MPI" is unset.  Set to 1 for MPI or 0 for no MPI.
+#else
+#  if USE_MPI
+#    define USE_MPI 1
+#  else
+#    define USE_MPI 0
+#  endif
 #endif
 
 // If user does not specify USE_OPENMP then detect OpenMP availability.
-
 #ifndef USE_OPENMP
 #  ifdef _OPENMP
+#    define USE_OPENMP 1
+#  else
+#    define USE_OPENMP 0
+#  endif
+#else
+#  if USE_OPENMP
 #    define USE_OPENMP 1
 #  else
 #    define USE_OPENMP 0
@@ -24,7 +35,8 @@
 
 ////////////////////////////////////////////////////////////////////////
 
-// Standard and proprietary headers.  Note _GNU_SOURCE.
+// Standard and proprietary headers.  Note _GNU_SOURCE at the top of
+// this file.
 
 #include <sched.h>
 #include <sys/types.h>
@@ -50,27 +62,38 @@
 #endif
 
 ////////////////////////////////////////////////////////////////////////
+// Globals
 
-// Workaround for bug in some versions of glibc: CPU_COUNT undefined
-
-#ifndef CPU_COUNT
-static int
-CPU_COUNT(cpu_set_t *set) {
-  int i, count=0;
-  for(i=0;i<CPU_SETSIZE;i++)
-    count += !! CPU_ISSET(i, set);
-  return count;
-}
-#endif
+static const char *exename_g = NULL; // executable name
 
 ////////////////////////////////////////////////////////////////////////
+// Function Declarations
 
+void make_exename(const char *argv0);
 int deallocate_affinity(int **thread_cpu_list,int *nthreads);
 int find_affinity(int ***thread_cpu_list,int *nthreads);
 int print_affinity();
 int main(int argc,char**argv);
 
 ////////////////////////////////////////////////////////////////////////
+// make_exename: initialize the exename_g global variable with either
+// the executable name or some reasonable approximation of one.
+
+void make_exename(const char *argv0) {
+  char *work=strdup(argv0);
+  char *bn=basename(work); // Note: this is the GNU basename, not POSIX.
+  if(! *bn) { // empty string
+    exename_g=strdup("(cputest)");
+    free(work);
+  } else {
+    memmove(work,bn,strlen(bn)+1);
+    exename_g=work;
+  };
+}
+
+////////////////////////////////////////////////////////////////////////
+// deallocate_affinity: frees an affinity list allocated by
+// find_affinity.
 
 int deallocate_affinity(int **thread_cpu_list,int *nthreads) {
   int **free_me;
@@ -84,6 +107,18 @@ int deallocate_affinity(int **thread_cpu_list,int *nthreads) {
 }
 
 ////////////////////////////////////////////////////////////////////////
+// find_affinity: populates a 2D array of affinity information:
+//
+//     thread_cpu_list[nthreads][CPU_SETSIZE]
+//
+// Which can be deallocated via deallocate_affinity().  The
+// CPU_SETSIZE is the internal Linux kernel maximum number of CPUs in
+// a set.  The nthreads is the number of OpenMP threads detected by
+// omp_get_num_threads within an OpenMP Parallel region.
+//
+// Each element of the array contains either -1, for a CPU not in the
+// affinity of that thread, or the CPU number (index within second
+// dimension) for CPUs in the affinity of that thread.
 
 int find_affinity(int ***thread_cpu_list_ptr,int *nthreads_ptr) {
   cpu_set_t mask;
@@ -121,11 +156,15 @@ int find_affinity(int ***thread_cpu_list_ptr,int *nthreads_ptr) {
 
     fail=0;
 
-    tid=syscall(SYS_gettid);  // Linux thread ID
+    // Get the Linux thread ID.  This is like a process ID, but is for
+    // the specific thread within that process.  The surrounding
+    // OpenMP parallel blocks will ensure we're inside one of the
+    // compute threads.
+    tid=syscall(SYS_gettid);
     
-    /* Get the list of CPUs this thread can access.  Store -1 for each
-       CPU that cannot be used, and the CPU number for CPUs that can
-       be used. */
+    // Get the list of CPUs this thread can access.  Store -1 for each
+    // CPU that cannot be used, and the CPU number for CPUs that can
+    // be used.
 
 #if USE_OPENMP
 #pragma omp critical
@@ -216,8 +255,10 @@ int print_affinity() {
       bufsize=bufneed;
     } // allocate buffer
 
-    if(0>=snprintf(buf,bufsize,"rank %04d thread %03d on host %s is restricted to CPUs:",
-                   rank,ithread,hostname)) {
+    if(0>=snprintf(buf,bufsize,
+                   "rank %04d thread %03d on host %s exe %s "
+                   "is restricted to CPUs:",
+                   rank,ithread,hostname,exename_g)) {
       fprintf(stderr,"Cannot write to internal array via snprintf: %s\n",
               strerror(errno));
       return -5;
@@ -262,6 +303,8 @@ int main(int argc, char **argv) {
   }
 #endif
 
+  make_exename(argv[0]);
+  
   if(print_affinity()) {
     fprintf(stderr,"Trouble printing affinity.\n");
     return 2;
