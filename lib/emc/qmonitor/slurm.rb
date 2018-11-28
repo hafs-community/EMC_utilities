@@ -109,10 +109,9 @@ module EMC
             if rest =~ /PackJobOffset=(\S+)/
               pack_offset=$1
               if not job.include? 'slurm/pack_offset_list'
-                job['slurm/pack_offset_list'] = [ pack_offset ]
-              else
-                job['slurm/pack_offset_list'] << pack_offset
+                job['slurm/pack_offset_list'] = Array.new
               end
+              job['slurm/pack_offset_list'] << pack_offset
             end
           else
             rest=line
@@ -132,7 +131,8 @@ module EMC
 
             # Store all keys per pack element in slurm/N/key where N is offset
             if not pack_offset.nil?
-              job['slurm/offset_#{pack_offset}/#{key}']=value
+              pack_key="slurm/offset_#{pack_offset}/#{key}"
+              job[pack_key]=value
             end
 
             # Store a second copy in the slurm/pack folder.  For this,
@@ -185,7 +185,6 @@ module EMC
               job['user']=user_name_id
             end
           end
-
           if job.include? 'slurm/pack_offset_list'
             ncpu=0
             job['slurm/pack_offset_list'].each do |pack_offset|
