@@ -34,8 +34,44 @@ module EMC
         'TIMEOUT' => 'RM'
       }
 
+      FIELDS=[
+              [ 40, 'jobid' ],
+              [ 40, 'username' ],
+              [ 10, 'numcpus' ],
+              [ 20, 'partition' ],
+              [ 30, 'submittime' ],
+              [ 30, 'starttime' ],
+              [ 30, 'endtime' ],
+              [ 30, 'priority' ],
+              [ 10, 'exit_code' ],
+              [ 30, 'state' ],
+              [ 200, 'name' ],
+              [ 200, 'stdin' ],
+              [ 200, 'stdout' ],
+              [ 200, 'stderr' ],
+              [ 200, 'workdir' ],
+              [ 40, 'qos' ],
+              [ 40, 'groupname' ],
+              [ 40, 'account' ],
+              [ 60, 'reservation' ],
+             ]
+
       def initialize(options,user)
         super
+      end
+
+      def call_squeue()
+        squeue_command="squeue -h -a -t all -M all"
+        
+        if not @user.nil?
+          squeue_command += " -u '#{@user}'"
+        end
+
+        squeue_command += " -O '"
+
+        squeue_command += FIELDS.collect { |a,b| "#{b}:#{a}" }.join(',')
+        squeue_command += "'"
+        return `#{squeue_command}`
       end
 
       def call_queue_manager()
@@ -50,134 +86,62 @@ module EMC
           return jobs
         end
 
-        stdin,stdout,stderr=Open3.popen3("scontrol --all show job")
-        stdin.close
-        text=stdout.read
-        stderr.read
-
-        jobs = text_to_jobs text
-        process_slurm_info jobs
-
-        if not @user.nil?
-          jobs.delete_if do |jobid,job|
-            ( not job.include? 'user' ) or
-              job['user'].nil? or job['user'].downcase!=@user.downcase
+        jobs={}
+        call_squeue.each_line do |line|
+          n1=0
+          job={}
+          FIELDS.each do |width,field|
+            n2=n1+width-1
+            part=line[n1..n2]
+            part='' if part.nil?
+            part=part.strip
+            if part!= '(null)'
+              job["slurm/#{field}"]=part
+            end
+            n1=n2+1
+          end
+          jobid=job.fetch('slurm/jobid',' ')
+          username=job.fetch('slurm/username',' ')
+          if jobid =~ /\S/ and username=~/\S/
+            job['jobid']=jobid
+            jobs[jobid]=job
           end
         end
+        process_slurm_info jobs
 
         return jobs
       end # call_queue_manager
 
-      def text_to_jobs(text)
-        job=nil
-        pack_id=nil
-        job_id=nil
-        pack_offset=nil
-        rest=nil
-        update_job=nil
-
-        text.each_line do |line|
-          if line =~ /^No jobs/i
-            return Hash.new
-          end
-
-          if line =~ /^JobId=(\S+)(.*)/
-            # Start of new job or part of a multi-part job
-            pack_id=$1
-            job_id=$1
-            pack_offset=nil
-            rest=$2
-            update_job=false
-            job=nil
-
-            if rest =~ /PackJobId=(\S+)/
-              pack_id=$1
-              job_id=$1
-              update_job=true
-              job=jobs[job_id]
-            end  
-
-            if job.nil?
-              job=Hash.new
-              jobs[job_id]=job
-              job['jobid']=job_id
-            end
-
-            if rest =~ /PackJobId=(\S+)/
-              job['slurm/pack_id']=pack_id
-            end
-            if rest =~ /PackJobOffset=(\S+)/
-              pack_offset=$1
-              if not job.include? 'slurm/pack_offset_list'
-                job['slurm/pack_offset_list'] = Array.new
-              end
-              job['slurm/pack_offset_list'] << pack_offset
-            end
-          else
-            rest=line
-          end # if line starts with JobID
-
-          if job.nil?
-            raise "Nil job for line #{rest.inspect}"
-          end
-
-          splat=rest.split(" ")
-          collected=splat.collect do |x|
-            (if x.include? "=" then x.split("=",2) else [ x, "" ] end )
-          end
-          collected.each do |key_value|
-            key = key_value[0]
-            value = key_value[1]
-
-            # Store all keys per pack element in slurm/N/key where N is offset
-            if not pack_offset.nil?
-              pack_key="slurm/offset_#{pack_offset}/#{key}"
-              job[pack_key]=value
-            end
-
-            # Store a second copy in the slurm/pack folder.  For this,
-            # we use the first copy of a key we find, but allow offset
-            # 0 to override.
-            slurm_key="slurm/pack/#{key}"
-            if pack_offset.nil? or pack_offset==0
-              job[slurm_key]=value
-            elsif not job.include? slurm_key
-              job[slurm_key]=value
-            end
-          end # collect key/value pairs
-        end # each line of stdout
-        return jobs
-      end # text_to_jobs
-
       def process_slurm_info(jobs)
-        jobs.each do |pack_id,job|
+        jobs.each do |jobid,job|
           if job.nil?
             raise "Nil job for job id #{pack_id}"
           end
-          job['long_state']=job.fetch('slurm/pack/JobState','??')
+          job['long_state']=job.fetch('slurm/state','??')
           if STATE_MAP.include? job['long_state']
             job['state']=STATE_MAP[job['long_state']]
           else
             job['state']=job['long_state']
           end
-          job['queue']=job.fetch('slurm/pack/QOS','??')
+          job['queue']=job.fetch('slurm/qos','??')
           job['class']=job['queue']
           job['exeguess']='??'
-          job['project']=job.fetch('slurm/pack/Account','??')
-          job['name']=job.fetch('slurm/pack/JobName','??')
-          job['out']=job.fetch('slurm/pack/StdOut','??')
-          job['err']=job.fetch('slurm/pack/StdErr','??')
-          job['in']=job.fetch('slurm/pack/StdIn','??')
-          job['workdir']=job.fetch('slurm/pack/WorkDir','??')
-          job['group']=job.fetch('slurm/pack/GroupId','??')
-          if job.include? 'slurm/pack/SubmitTime'
-            job['qtime']=fromdate(job['slurm/pack/SubmitTime'])
+          job['project']=job.fetch('slurm/account','??')
+          job['reservation']=job.fetch('slurm/reservation','')
+          job['name']=job.fetch('slurm/name','??')
+          job['out']=job.fetch('slurm/stdout','??')
+          job['err']=job.fetch('slurm/stderr','??')
+          job['in']=job.fetch('slurm/stdin','??')
+          job['workdir']=job.fetch('slurm/workdir','??')
+          job['group']=job.fetch('slurm/groupname','??')
+          if job.include? 'slurm/submittime'
+            job['qtime']=fromdate(job['slurm/submittime'])
           else
             job['qtime']='??'
           end
 
-          if job.include? 'slurm/pack/UserId'
-            user_name_id=job['slurm/pack/UserId']
+          if job.include? 'slurm/username'
+            user_name_id=job['slurm/username']
             if user_name_id =~ /([^\(]+)\((\S+)\)/
               job['user']=$1
               job['uid']=$2
@@ -185,23 +149,8 @@ module EMC
               job['user']=user_name_id
             end
           end
-          if job.include? 'slurm/pack_offset_list'
-            ncpu=0
-            job['slurm/pack_offset_list'].each do |pack_offset|
-              ncpu_key="slurm/offset_#{pack_offset}/NumCPUs"
-              ncpu = ncpu + job.fetch(ncpu_key,0).to_i
-              job['procs_from']='Sum of NumCPUs over entire pack.'
-            end
-          else
-            ncpu=job.fetch('slurm/pack/NumCPUs',nil)
-            job['procs_from']='NumCPUs'
-          end
-          if ncpu.nil?
-            job['procs']='??'
-            job['procs_from']='Gave up.  Have no NumCPUs.'
-          else
-            job['procs']=ncpu
-          end
+          job['procs']=job.fetch('slurm/numcpus','??')
+          job['procs_from']='slurm/numcpus'
         end
         return jobs
       end
