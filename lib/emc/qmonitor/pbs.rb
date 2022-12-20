@@ -88,6 +88,12 @@ module EMC
           jobs=Hash.new
         end
         doc=JSON.parse(text)
+        if doc.nil?
+          return
+        elsif doc["Jobs"].nil?
+          return
+        end
+
         doc["Jobs"].each do |jobid,el|
           hat = Hash.new
           
@@ -109,8 +115,10 @@ module EMC
           hat['project']=el['Account_Name']
 
           hat['procs'] = el["Resource_List/ncpus"]
-          if hat['procs'].nil?
-            hat['procs'] = el['resources_used']['ncpus']
+          if hat['procs'].nil? or hat['procs'].empty?
+            if not el['resources_used'].nil?
+              hat['procs'] = el['resources_used']['ncpus']
+            end
           end
           
           hat['exeguess']=nonil(hat['t/Submit_arguments']).gsub(/.* /,'')
