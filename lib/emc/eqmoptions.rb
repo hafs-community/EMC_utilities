@@ -147,12 +147,12 @@ module EMC
             'default'=>'<14:id> <*-7:class> <-2:state> <*11:queue.time()> <out.shortpath>',
             'foot2'=>'From <Q_SOURCE> (age <Q_AGE> sec.)',
             'head1'=>' Job Step ID    Class  ST  Queue Time > Output File',
-            'head1'=>'-------------- ------- -- -----------   --------------------------------------',
+            'head2'=>'-------------- ------- -- -----------   --------------------------------------',
           },
           'climqac'=>{
             'default'=>'<exe.shortpath>  <15:jobid>    <*11:qtime.time()>  <2:state>',
             'head1'=>'',
-            'head1'=>'  Executable             ID         Submitted    ST ',
+            'head2'=>'  Executable             ID         Submitted    ST ',
           },
           'eqm'=>{
             'default'=>'<14:jobid> <5:procs> <-2:state> <*11:qtime.time()>   <out.shortpath>',
