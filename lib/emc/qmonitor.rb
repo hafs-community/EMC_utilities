@@ -4,6 +4,7 @@ require 'emc/eqmoptions.rb'
 
 require 'emc/qmonitor/moab.rb'
 require 'emc/qmonitor/lsf.rb'
+require 'emc/qmonitor/pbs.rb'
 require 'emc/qmonitor/slurm.rb'
 require 'emc/qmonitor/torque.rb'
 require 'emc/qmonitor/gridengine.rb'
@@ -351,6 +352,8 @@ module EMC
           elsif(File.exist?('/lustre/f1')) then
             # GAEA
             qs=EMC::Queues::MoabQueueState.new(self,user)
+          elsif(File.exist?('/lfs')) then
+            qs=EMC::Queues::PBSQueueState.new(self,user)
           elsif(File.exist?('/selinux')) then
             # Probably WCOSS
             qs=EMC::Queues::LSFQueueState.new(self,user)
