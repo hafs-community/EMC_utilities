@@ -30,34 +30,42 @@ module EMC
           jobs=Hash.new()
           for irep in 1..reps
             job_list_command="#{@opts.qstat_path}"
+            find_jobs=true
             if(@opts.manual_options!=nil)
               job_list_command+=" #{@opts.manual_options}"
             elsif(user==nil) then
               # Don't need anything -- all users selected by default
+              find_jobs=false
             else
               job_list_command+=" -u #{user}"
             end
-            warn "COMMAND: #{job_list_command}" if @opts.verbose
-            result=`#{job_list_command}`
-            jobids=[]
-            result.split(/[\r\n]/).each { |line|
-              begin
-                line.scan(/^ *(\d+)/).each { |match|
-                  jobids.push(match[0].to_i)
-                }
-              rescue
-                warn "warning: cannot parse line from qstat: #{line}"
+            if find_jobs
+              warn "COMMAND: #{job_list_command}" if @opts.verbose
+              result=`#{job_list_command}`
+              jobids=[]
+              result.split(/[\r\n]/).each { |line|
+                begin
+                  line.scan(/^ *(\d+)/).each { |match|
+                    jobids.push(match[0].to_i)
+                  }
+                rescue
+                  warn "warning: cannot parse line from qstat: #{line}"
+                end
+              }
+              if(jobids.empty?)
+                return nil
               end
-            }
-            if(jobids.empty?)
-              return nil
             end
             command="#{@opts.qstat_path} -f -F json "
             if(@opts.manual_options!=nil)
               command+=" #{@opts.manual_options}"
             end
-            @queue_from="#{command} job list"
-            command=command+jobids.join(' ')
+            if find_jobs
+              @queue_from="#{command} job list"
+              command=command+jobids.join(' ')
+            else
+              @queue_from="#{command}"
+            end
             warn "COMMAND: #{command}" if @opts.verbose
             fromloc=command
             agetype='AT'
@@ -87,7 +95,19 @@ module EMC
         if(jobs==nil) then
           jobs=Hash.new
         end
-        doc=JSON.parse(text)
+
+        # json from qstat is sometimes invalid.
+        cleaned = text.gsub(/^([ 	]*"[^"]*":)(00+)(,.*)$/, '\1"\2"\3')
+        
+        if @opts.verbose
+          doc=JSON.parse(cleaned)
+        else
+          begin
+            doc=JSON.parse(cleaned)
+          rescue
+            STDERR.puts("Cannot parse json text from qstat. You probably do not want the full error message, because it is often several megabytes long. Rerun with --verbose if you really want the full error message.")
+          end
+        end
         if doc.nil?
           return
         elsif doc["Jobs"].nil?
