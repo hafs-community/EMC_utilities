@@ -134,11 +134,11 @@ module EMC
           hat['qtime']=DateTime.parse(el['qtime']).to_time.to_i
           hat['project']=el['Account_Name']
 
-          hat['procs'] = el["Resource_List/ncpus"]
-          if hat['procs'].nil? or hat['procs'].empty?
-            if not el['resources_used'].nil?
-              hat['procs'] = el['resources_used']['ncpus']
-            end
+          if !el['Resource_List'].nil? and !el['Resource_List'].empty?
+            hat['procs'] = el["Resource_List"]["ncpus"]
+          end
+          if hat['procs'].nil? and !el['resources_used'].nil?
+            hat['procs'] = el['resources_used']['ncpus']
           end
           
           hat['exeguess']=nonil(hat['t/Submit_arguments']).gsub(/.* /,'')
