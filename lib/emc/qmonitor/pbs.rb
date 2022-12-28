@@ -29,7 +29,7 @@ module EMC
           end
           jobs=Hash.new()
           for irep in 1..reps
-            job_list_command="#{@opts.qstat_path}"
+            job_list_command="#{@opts.qselect_path}"
             find_jobs=true
             if(@opts.manual_options!=nil)
               job_list_command+=" #{@opts.manual_options}"

@@ -18,7 +18,7 @@ module EMC
       include EMC::NoNil
       attr_reader :hhs_stid,:hhs_hwrfdata,:hhs_logdir,:hhs_jobid,:hhs_extra,:hhs_kick,:hhs_ens
       attr_reader :colormap,:hhs_colormap,:namemap,:groups,:emu_printers,:bjobs_path
-      attr_reader :emu_colormaps,:greps,:antigreps,:cache,:qstat_path,:cache_file
+      attr_reader :emu_colormaps,:greps,:antigreps,:cache,:qstat_path,:cache_file,:qselect_path
       attr_reader :max_age,:max_loops,:loops,:min_sleep_time,:sleep_time,:reps
       attr_reader :looping,:rep_sleep,:max_reps,:min_rep_sleep,:force_blocking
       attr_reader :clear_screen,:user,:manual_options,:force_blocking,:emu_mode
@@ -248,6 +248,7 @@ module EMC
         @bjobs_path='bjobs'
         @bhist_path='bhist'
         @qstat_path='qstat'
+        @qselect_path='qselect'
         @bhist_options=nil
         @pbsquery_path='pbsquery'
         @llq_path='llq'
@@ -438,6 +439,7 @@ EOS
           when '--queue-manager'    ; @queue_manager=arg
           when '--help'             ; usage()
           when '--qstat-path'       ; @qstat_path=arg
+          when '--qselect-path'     ; @qselect_path=arg
           when '--pbsquery-path'    ; @pbsquery_path=arg
           when '--bjobs-path'       ; @bjobs_path=arg
           when '--bhist-path'       ; @bhist_path=arg
