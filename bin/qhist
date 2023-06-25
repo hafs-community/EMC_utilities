@@ -1,0 +1,94 @@
+#! /usr/bin/env ruby
+
+require 'emc/qdisplay'
+require 'time'
+
+include EMC::Queues
+
+# Parse arguments and environment:
+qo=EQMOptions.new()
+qo.set_emu_mode('qhist')
+qo.parse_arguments(ARGV)
+
+puts "'#{ARGV[0]}' '#{ARGV[1]}' '#{ARGV[2]}'"
+starttime=Time.parse(ARGV[0])
+endtime=Time.parse(ARGV[1])
+timestep=ARGV[2].to_i
+
+puts "ARGS: start=#{starttime}  end=#{endtime}  step=#{timestep}"
+
+if timestep<1
+  puts "Timestep must be 1 second or greater."
+  exit 1
+end
+
+# Get the queue state
+puts "Get queue state..."
+qs=qo.get_state()
+qs.update()
+
+puts "Parse queue state information..."
+results=Hash.new
+
+# Parse state for dates of interest
+now=starttime
+while now<endtime+20
+  puts "Process #{now.strftime("%Y-%m-%d_%H:%M:%S")}..."
+  qt=qs.for_time(now)
+  state_sum=Hash.new
+  qt.jobs.each do |jobid,job|
+    state=job['state']
+    procs=job['procs']
+    #user=job['user']
+    #name=job['name']
+
+    procs=0 if procs.nil?
+    #user='unknown' if user.nil?
+    #name='unknown' if name.nil?
+    state='??' if state.nil?
+
+    #puts "JOB #{jobid} #{state} #{procs} #{user} #{name}"
+    if state_sum[state].nil?
+      state_sum[state]=procs.to_i
+    else
+      state_sum[state]+=procs.to_i
+    end
+  end
+  state_sum.each do |state,procs|
+    puts "#{state} = #{procs}"
+  end
+  results[now]=state_sum
+  now=now+timestep
+end
+
+sizes=Hash.new
+results.each do |time,usage|
+  usage.each do |state,count|
+    if count>0
+      size=((Math.log(count)/Math.log(10)).floor+1).to_i
+    else
+      size=1
+    end
+    sizes[state]=[sizes[state].to_i,size,4].max
+  end
+end
+
+print(' '*8 + 'TIME' + ' '*7 +' | ')
+sizes.each do |state,size|
+  before=[0,((size-state.length)/2.0).floor].max
+  after=[0,((size-state.length)/2.0).ceil].max
+  print(' '*before + state + ' '*after + ' | ')
+end
+print("\n")
+
+results.keys.sort.each do |time|
+  usage=results[time]
+  print time.strftime('%Y-%m-%d %H:%M:%S | ')
+  sizes.each do |state,size|
+    susage=sprintf("%#{size}d",usage[state])
+    before=[0,((size-susage.length)/2.0).floor].max
+    after=[0,((size-susage.length)/2.0).ceil].max
+    print(' '*before + susage + ' '*after+" | ")
+  end
+  print "\n"
+end
