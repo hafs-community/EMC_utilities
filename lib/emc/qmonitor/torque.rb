@@ -37,7 +37,7 @@ module EMC
             warn "COMMAND: #{job_list_command}" if @opts.verbose
             result=`#{job_list_command}`
             jobids=[]
-            result.split(/[\r\n]/).each_line { |line|
+            result.split(/[\r\n]/).each { |line|
               begin
                 line.scan(/^ *(\d+)/).each { |match|
                   jobids.push(match[0].to_i)

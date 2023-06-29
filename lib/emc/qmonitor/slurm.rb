@@ -9,9 +9,9 @@ module EMC
 
       STATE_MAP={
         'BOOT_FAIL' => 'RM',
-        'CANCELLED' => 'RM',
+        'CANCELED' => 'RM',
         'COMPLETED' => 'C',
-        'CONFIGURING' => 'R',
+        'CONFIGURING' => 'CF',
         'COMPLETING' => 'R',
         'DEADLINE' => 'C',
         'FAILED' => 'RM',
